@@ -1,4 +1,5 @@
 <?php
+// Farid
 ini_set('display_errors', false);
 error_reporting(E_ALL);
 require_once('sps_mobile_server_error_codes.php');

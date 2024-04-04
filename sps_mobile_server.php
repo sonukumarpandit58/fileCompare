@@ -66,9 +66,563 @@ $logString = json_encode($_REQUEST) . PHP_EOL;
 
 switch ($_REQUEST['cmd']):
     /*---- Case 0002 for Gate Configuration data retrieval ----*/
+
+    /* Start : Sonu Code */
+    case 'areaLocation':
+        try {
+            $response = curlCall($baseUrl . "/socket/sticker_membership/create", [], "GET");
+            if ($response['status']) {
+                $response['message'] = 'Sticker Membership Data received successfully';
+                $response_data = json_encode(array('err_code' => '0', 'response' => $response));
+                $logString .= $response_data . "\n" . PHP_EOL;
+                echo $response_data;
+                createLog($logString);
+                exit();
+            }
+    
+            throw new Exception($response['message']);
+    
+        } catch (Exception $e) {
+    
+            $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
+            echo $response_data;
+            $logString .= $response_data . "\n" . PHP_EOL;
+            createLog($logString);
+            exit();
+        }
+
+        echo json_encode(array('err_code' => '0', 'data' => $response));
+            $logString .= $response . "\n" . PHP_EOL;
+            createLog($logString);
+            break;
+
+    case 'checkVehicleFastagExist':
+        try {
+            $json = $_REQUEST['formData'];
+            $json = json_decode($json, true);
+            $vehicleNo = $json['vehicleNo'];
+            $fastagId = $json['fastagId'];
+
+            $requestData = [
+                'vehicle_no' => $vehicleNo,
+                'fastag_id' => $fastagId,
+            ];
+
+            $response = curlCall($baseUrl . "/socket/sticker_membership/check_vehicle_details", $requestData, "POST");
+            $response_data = json_encode(array('err_code' => '0', 'data' => $response));
+            $logString .= $response_data . "\n" . PHP_EOL;
+            echo $response_data;
+            createLog($logString);
+            exit();
+    
+            throw new Exception($response['message']);
+    
+        } catch (Exception $e) {
+    
+            $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
+            echo $response_data;
+            $logString .= $response_data . "\n" . PHP_EOL;
+            createLog($logString);
+            exit();
+        }
+    break;        
+
+    case 'fetchFastagId':
+        try {
+            $vehicleNo = $_REQUEST['vehicleNo'];
+            $res = curlCall($baseUrl . "/socket/sticker_membership/fetch_fastag_id/" . $vehicleNo, [], "GET");
+            if($res['fastagId']){
+                $response['fastagId'] = $res['fastagId'];
+                $response['status'] = "true";
+                $response['message'] = 'record found';
+                $response_data = json_encode(array('err_code' => '0', 'data' => $response));
+                $logString .= $response_data . "\n" . PHP_EOL;
+                echo $response_data;
+                createLog($logString);
+                exit();
+            }else{
+                if($res['exists'] == "1"){
+                    $response['status'] = "exist";
+                    $response['message'] = 'no record found';
+                    $response_data = json_encode(array('err_code' => '0', 'data' => $response));
+                    $logString .= $response_data . "\n" . PHP_EOL;
+                    echo $response_data;
+                    createLog($logString);
+                    exit();
+                }else{
+                    $response['status'] = "false";
+                    $response['message'] = 'no record found';
+                    $response_data = json_encode(array('err_code' => '0', 'data' => $response));
+                    $logString .= $response_data . "\n" . PHP_EOL;
+                    echo $response_data;
+                    createLog($logString);
+                    exit();
+                }
+                
+            }
+            throw new Exception($response['message']);
+    
+        } catch (Exception $e) {
+    
+            $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $e->getMessage()));
+            echo $response_data;
+            $logString .= $response_data . "\n" . PHP_EOL;
+            createLog($logString);
+            exit();
+        }
+        break;
+    
+    case  'fetchVehicleNo':
+        try {
+            $fastagId = $_REQUEST['fastagId'];
+            $res = curlCall($baseUrl . "/socket/sticker_membership/fetch_vehicle_no/" . $fastagId, [], "GET");
+            if($res['vehicleNo']){
+                $response['vehicleNo'] = $res['vehicleNo'];
+                $response['status'] = "true";
+                $response_data = json_encode(array('err_code' => '0', 'data' => $response));
+                $logString .= $response_data . "\n" . PHP_EOL;
+                echo $response_data;
+                createLog($logString);
+                exit();
+            }
+    
+            if ($response['status']) {
+                $response['message'] = 'Sticker Membership Fetch Vehicle No Successfully';
+                $response_data = json_encode(array('err_code' => '0', 'data' => $response));
+                $logString .= $response_data . "\n" . PHP_EOL;
+                echo $response_data;
+                createLog($logString);
+                exit();
+            }
+            throw new Exception($response['message']);
+    
+        } catch (Exception $e) {
+    
+            $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
+            echo $response_data;
+            $logString .= $response_data . "\n" . PHP_EOL;
+            createLog($logString);
+            exit();
+        }
+        break;
+
+    case "tariffData":
+        try {
+            $productId = $_REQUEST['productId'];
+            $tariffCount = $_REQUEST['count'];
+            $response = curlCall($baseUrl . "/socket/sticker_membership/tariffdata/" . $productId, ['count' => $tariffCount], "GET");
+            
+            if ($response['status']) {
+                $response_data = json_encode(array('err_code' => '0', 'data' => $response));
+                $logString .= $response_data . "\n" . PHP_EOL;
+                echo $response_data;
+                createLog($logString);
+                exit();
+            }
+    
+            throw new Exception($response['message']);
+    
+        } catch (Exception $e) {
+    
+            $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
+            echo $response_data;
+            $logString .= $response_data . "\n" . PHP_EOL;
+            createLog($logString);
+            exit();
+        }
+    break;
+
+    case  "getStickerMemberCalculateDate":
+        try {
+            $json = $_REQUEST['formData'];
+            $json = json_decode($json, true);
+            if (isset($json['calenderProduct'])) {
+                $calenderProduct = $json['calenderProduct'];
+                $startDate = $json['startDate'];
+                //$useCurrentDate = $json['useCurrentDate'];
+                $periodType = $json['periodType'];
+                $periodLength = $json['periodLength'];
+                $tolerance = $json['tolerance'];
+                $requestData = [
+                    'calenderProduct' => $calenderProduct,
+                    'startDate' => $startDate,
+                    //'useCurrentDate' => $useCurrentDate,
+                    'periodType' => $periodType,
+                    'periodLength' => $periodLength,
+                    'tolerance' => $tolerance,
+                ];
+    
+            } else {
+                $startDate = $json['startDate'];
+                $periodType = $json['periodType'];
+                $periodLength = $json['periodLength'];
+                $tolerance = $json['tolerance'];
+                $requestData = [
+                    'startDate' => $startDate,
+                    'periodType' => $periodType,
+                    'periodLength' => $periodLength,
+                    'tolerance' => $tolerance,
+                ];
+            }
+    
+            $response = curlCall($baseUrl . "/socket/sticker_membership/calculate_date", $requestData, "POST");
+            if ($response['status']) {
+                $response['message'] = 'Sticker Tariff Calculated Date Listed Successfully';
+                $response_data = json_encode(array('err_code' => '0', 'data' => $response));
+                $logString .= $response_data . "\n" . PHP_EOL;
+                echo $response_data;
+                createLog($logString);
+                exit();
+            }
+    
+            throw new Exception($response['message']);
+    
+        } catch (Exception $e) {
+    
+            $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
+            echo $response_data;
+            $logString .= $response_data . "\n" . PHP_EOL;
+            createLog($logString);
+            exit();
+        }
+
+    break;
+
+    case "sendFastagMembershipData":
+    try {
+        $json = $_REQUEST['formData'];
+        $json = json_decode($json, true);
+
+        date_default_timezone_set("Asia/Calcutta");   //India time (GMT+5:30)
+        $dbDateTime = date('Y-m-d H:i:s');
+
+        $vehicleNo = array($json['vehicle1'],$json['vehicle2'],$json['vehicle3']);
+        $fastagId = array($json['fastagId1'],$json['fastagId2'],$json['fastagId3']);
+        $vehiclePriority = array($json['vehiclePriority1'],$json['vehiclePriority2'],$json['vehiclePriority3']);
+
+        $requestData = [
+            "member_id" => $json['memberId'],
+            "area_id" => $json['areaId'],
+            "location_id" => $json['locationId'],
+            "membership_product" => $json['productId'],
+            "hidden_sticker_membership_product_id" => $json['productId'],
+            "tariff_name" => $json['tariffName'],
+            "tolerance" => $json['tolerance'],
+            "tariff" => $json['tariff'],
+            "vehicle_charge" => $json['vehicleCharge'],
+            "new_card_charge" => $json['newCardCharge'],
+            "extend_charge" => $json['extendCharge'],
+            "vehicle_change_charge" => $json['vehicleChangeCharge'],
+            "from_time" => $json['fromTime'],
+            "to_time" => $json['toTime'],
+            "duration" => $json['duration'],
+            "tariff_charge" => $json['tariffCharge'],
+            "payment_mode" => $json['paymentMode'],
+            "membership_no" => $json['membershipNo'],
+            "status" => $json['status'],
+            "membership_type" => $json['membershipType'],
+            "reciept_hidden" => $json['recieptHidden'],
+            "reciept" => $json['recieptHidden'],
+            "period_to" => $json['periodTo'],
+            "period_from" => $json['periodFrom'],
+            "card_deposite_fee" => $json['cardDepositeFee'],
+            "vehicle_no" => json_encode($vehicleNo),
+            "fastag_id" => json_encode($fastagId),
+            "vehicle_priority" => json_encode($vehiclePriority),
+            "created_by" => $dbDateTime
+        ];
+
+        $response = curlCall($baseUrl . "/socket/sticker_membership", $requestData, "POST");
+        if($response['status']){
+            $response['result'] = 'true';
+            $response_data = json_encode(array('err_code' => '0', 'data' => $response));
+            $logString .= $response_data . "\n" . PHP_EOL;
+            echo $response_data;
+            createLog($logString);
+            exit();
+        }
+        throw new Exception($response['message']);
+
+    } catch (Exception $e) {
+
+        $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $e->getMessage()));
+        echo $response_data;
+        $logString .= $response_data . "\n" . PHP_EOL;
+        createLog($logString);
+        exit();
+    }
+    break;
+
+    case 'updateFastagMembershipDataApi':
+        try {
+
+            $json = $_REQUEST['formData'];
+            $json = json_decode($json, true);
+    
+            $vehicleNo = array($json['vehicle1'],$json['vehicle2'],$json['vehicle3']);
+            $fastagId = array($json['fastagId1'],$json['fastagId2'],$json['fastagId3']);
+            $vehiclePriority = array($json['vehiclePriority1'],$json['vehiclePriority2'],$json['vehiclePriority3']);
+
+            $stickerMembershipId = $json['stickermembershipId'];
+    
+            $requestData = [
+                "sticker_membership_id" => $json['stickermembershipId'],
+                "member_id" => $json['memberId'],
+                "area_id" => $json['areaId'],
+                "location_id" => $json['locationId'],
+                "vehicle_priority" => $json['vehicle_priority'],
+                "membership_product" => $json['productId'],
+                "sticker_membership_product" => $json['productId'],
+                "hidden_sticker_membership_product_id" => $json['productId'],
+                "period_length" => $json['periodLength'],
+                "tariff_name" => $json['tariffName'],
+                "type" => $json['vehicleType'],
+                "tolerance" => $json['tolerance'],
+                "tariff" => $json['tariff'],
+                "vehicle_charge" => $json['vehicleCharge'],
+                "new_card_charge" => $json['newCardCharge'],
+                "extend_charge" => $json['extendCharge'],
+                "vehicle_change_charge" => $json['vehicleChangeCharge'],
+                "tariff_charge" => $json['tariffCharge'],
+                "payment_mode" => $json['paymentMode'],
+                "membership_no" => $json['membershipNo'],
+                "reciept" => $json['reciept'],
+                "status" => $json['status'],
+                "membership_type" => $json['membershipType'],
+                "reciept_hidden" => $json['recieptHidden'],
+                "period_to" => $json['periodTo'],
+                "period_from" => $json['periodFrom'],
+                "end_date" => $json['endDate'],
+                "new_start_date" => $json['newStartDate'],
+                "new_end_date" => $json['newEndDate'],
+                "extended_period_from" => $json['extendedPeriodFrom'],
+                "extended_period_to" => $json['extendedPeriodTo'],
+                "period_from_extend" => $json['periodFromExtend'],
+                "sticker_prod" => $json['sticker_prod'],
+                "extended_card_fee" => $json['extendedCardFee'],
+                "card_deposite_fee" => $json['cardDepositeFee'],
+                "sticker_prod_name" => $json['stickerProdName'],
+                "vehicle_no" => json_encode($vehicleNo),
+                "fastag_id" => json_encode($fastagId),
+                "vehicle_priority" => json_encode($vehiclePriority),
+                "user_id" => $json['userId'],
+            ];
+
+            $response = curlCall($baseUrl . "/socket/sticker_membership/update_membership", $requestData, "POST");
+
+            if($response['status']){
+                $response['result'] = 'true';
+                $response['message'] = 'Sticker Membership Updated successfully';
+                $response_data = json_encode(array('err_code' => '0', 'data' => $response));
+                $logString .= $response_data . "\n" . PHP_EOL;
+                echo $response_data;
+                createLog($logString);
+                exit();
+            }
+    
+            throw new Exception($response['message']);
+    
+        } catch (Exception $e) {
+    
+            $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
+            echo $response_data;
+            $logString .= $response_data . "\n" . PHP_EOL;
+            createLog($logString);
+            exit();
+        }
+    break;
+
+    case 'fastagMembershipSingleRecord':
+        try {
+
+            $memberId = $_REQUEST['memberId'];
+            $response = curlCall($baseUrl . "/socket/sticker_membership/". $memberId ."/edit", [], "GET");
+            if ($response['status']) {
+                $response['message'] = 'Sticker Membership Data received successfully';
+                $response_data = json_encode(array('err_code' => '0', 'response' => $response));
+                $logString .= $response_data . "\n" . PHP_EOL;
+                echo $response_data;
+                createLog($logString);
+                exit();
+            }
+
+            throw new Exception($response['message']);
+
+        } catch (Exception $e) {
+
+            $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
+            echo $response_data;
+            $logString .= $response_data . "\n" . PHP_EOL;
+            createLog($logString);
+            exit();
+        }
+    break;
+
+    case "fetchFastagMembershipData":
+        try {
+            $response = curlCall($baseUrl . "/socket/sticker_membership", [], "GET");
+            if ($response['status']) {
+                $response['message'] = 'Sticker Membership Data received successfully';
+                $response_data = json_encode(array('err_code' => '0', 'response' => $response));
+                $logString .= $response_data . "\n" . PHP_EOL;
+                echo $response_data;
+                createLog($logString);
+                exit();
+            }
+
+            throw new Exception($response['message']);
+
+        } catch (Exception $e) {
+
+            $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
+            echo $response_data;
+            $logString .= $response_data . "\n" . PHP_EOL;
+            createLog($logString);
+            exit();
+        }
+    break;
+
+    case 'showDataForDeleteMembership':
+        try {
+                $memberId = $_REQUEST['memberId'];
+                $response = curlCall($baseUrl . "/socket/sticker_membership/".$memberId."/delete" , [], "GET");
+
+                if($response['status']){
+                    $response['result'] = 'true';
+                    $response_data = json_encode(array('err_code' => '0', 'response' => $response));
+                    $logString .= $response_data . "\n" . PHP_EOL;
+                    echo $response_data;
+                    createLog($logString);
+                    exit();
+                }
+                throw new Exception($response['message']);
+            } catch (Exception $e) {
+
+                $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
+                echo $response_data;
+                $logString .= $response_data . "\n" . PHP_EOL;
+                createLog($logString);
+                exit();
+            }
+    break;
+
+    case 'fastagDeleteMembership':
+        try {
+            $json = $_REQUEST['formData'];
+            $json = json_decode($json, true);
+
+            $stickerMembershipId = $json['stickerMembershipId'];
+            $userId = $json['userId'];
+            $name = $json['name'];
+            $refundAmount = $json['refundAmount'];
+
+
+            $param = [
+                'stickerMembershipId' => $stickerMembershipId,
+                'user_id' => $userId,
+                'name' => $name,
+                'refund_amount' => $refundAmount,
+            ];
+
+            $response = curlCall($baseUrl . "/socket/sticker_membership/delete_membership" , $param, "POST");
+
+            if ($response['status']) {
+                $response['message'] = 'Sticker Membership Data received successfully';
+                $response_data = json_encode(array('err_code' => '0', 'response' => $response));
+                $logString .= $response_data . "\n" . PHP_EOL;
+                echo $response_data;
+                createLog($logString);
+                exit();
+            }
+
+            throw new Exception($response['message']);
+
+        } catch (Exception $e) {
+
+            $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
+            echo $response_data;
+            $logString .= $response_data . "\n" . PHP_EOL;
+            createLog($logString);
+            exit();
+        }
+    break;
+
+    case 'filterFastagMembershipData':
+        try {
+        $json = $_REQUEST['formData'];
+        $json = json_decode($json, true);
+        $productVehicleType = $json['productVehicleType'];
+        $memberId = $json['customerId'];
+        $customerName = $json['customerName'];
+        $status = $json['status'];
+        $vehNo = $json['vehicleNo'];
+        $fromDate1 = $json['fromDate1'];
+        $fromDate2 = $json['fromDate2'];
+        $toDate1 = $json['toDate1'];
+        $toDate2 = $json['toDate2'];
+
+        $response = curlCall($baseUrl . "/socket/sticker_membership?veh_no=".$vehNo."&product_vehicle_type=".$productVehicleType."&keyword=".$customerName."&status=".$status."&member_id=".$memberId."&from_date_1=".$fromDate1."&from_date_2=".$fromDate2."&to_date_1=".$toDate1."&to_date_2=".$toDate2, [], "GET");
+
+        if($response['status']){
+            $response['result'] = 'true';
+            $response_data = json_encode(array('err_code' => '0', 'response' => $response));
+            $logString .= $response_data . "\n" . PHP_EOL;
+            echo $response_data;
+            createLog($logString);
+            exit();
+        }
+         throw new Exception($response['message']);
+        } catch (Exception $e) {
+
+            $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
+            echo $response_data;
+            $logString .= $response_data . "\n" . PHP_EOL;
+            createLog($logString);
+            exit();
+        }
+    break;
+    /* End : Sonu Code */
+
+    case 'fastagReqTagDetails':
+        try {
+        $json = $_REQUEST['formData'];
+        $json = json_decode($json, true);
+        $vehicleNo = $json['vehicleNo'];
+        $laneNo = $json['laneNo'];
+        //$tid = $json['tid'];
+        $tagId = $json['tagId'];
+
+        // $response = curlCall($baseUrl . "/socket/sticker_membership/req_tag_details/".$vehNo."/".$laneNo, [], "GET");
+        
+        if(!empty($vehicleNo)){
+            $response = curlCall($baseUrl . "/socket/sticker_membership/req_tag_details?vehicleNo=".$vehicleNo."&laneId=".$laneNo, [], "GET");
+        }else{
+            $response = curlCall($baseUrl . "/socket/sticker_membership/req_tag_details?tagId=".$tagId."&laneId=".$laneNo, [], "GET");
+        }
+
+        if($response['status']){
+            $response['result'] = 'true';
+            $response_data = json_encode(array('err_code' => '0', 'response' => $response));
+            $logString .= $response_data . "\n" . PHP_EOL;
+            echo $response_data;
+            createLog($logString);
+            exit();
+        }
+         throw new Exception($response['message']);
+        } catch (Exception $e) {
+
+            $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
+            echo $response_data;
+            $logString .= $response_data . "\n" . PHP_EOL;
+            createLog($logString);
+            exit();
+        }
+    break;
+    /* End : Sonu Code */
+
     case "startUp":
         /*---- Fetching Gate Configuration Data ----*/
-        $gateConfig = mysqli_query($conn, "SELECT b.gate_id, b.gate_name, b.gate_type, b.standard_nested,b.gate_ip,b.is_full,b.grace_period,b.discount_additional,b.percentage_flat,b.discount_additional_value FROM sps_ip_address a, sps_gate_configurations b WHERE b.gate_ip = '" . $data['ip_id'] . "'  AND a.ip_id = b.gate_ip AND b.deleted_at IS NULL GROUP BY b.gate_id");
+        $gateConfig = mysqli_query($conn, "SELECT b.gate_id, b.gate_name, b.gate_type, b.standard_nested,b.gate_ip,b.fastag_gate_id, b.is_full,b.grace_period,b.discount_additional,b.percentage_flat,b.discount_additional_value FROM sps_ip_address a, sps_gate_configurations b WHERE b.gate_ip = '" . $data['ip_id'] . "'  AND a.ip_id = b.gate_ip AND b.deleted_at IS NULL GROUP BY b.gate_id");
         $GateConfig = mysqli_fetch_assoc($gateConfig);
         if ($GateConfig['gate_type'] != '5') {
             unset($GateConfig['grace_period']);
@@ -282,7 +836,7 @@ switch ($_REQUEST['cmd']):
         $response['role'] = $user_id_db['role'];
         $response['user_name'] = $user_id_db['user_name'];
         $response['name'] = $user_id_db['name'];
-        if ($response['user_role'] == 1 || $response['role'] == 'Auditor') {
+        if ($response['user_role'] == 1 || $response['role'] == 'Auditor' || $response['role'] == 'Supervisor') {
             $response_data = json_encode(array('err_code' => '0', 'data' => $response));
             echo $response_data;
             $logString .= $response_data . "\n" . PHP_EOL;
@@ -565,8 +1119,7 @@ switch ($_REQUEST['cmd']):
     /*---- Case 0004 for Entry Gate data insertion ----*/
     case "entry_transaction":
         try {
-
-            /* US793: Dynamic QR Code – Mobile Gate 
+            /* US793: Dynamic QR Code – Mobile Gate
                Allowing to set payment reference number in case of master payment mode E wallet
             */
             if ($_REQUEST['in_master_payment_mode'] == 4 && ($_REQUEST['in_payment_mode'] == 5 || $_REQUEST['in_payment_mode'] == 7) && !empty($_REQUEST['in_payment_referance_number'])) {
@@ -610,6 +1163,34 @@ switch ($_REQUEST['cmd']):
             $location_id = trim($_REQUEST['location_id']);
             $area_id = trim($_REQUEST['area_id']);
             $in_tariff_code = trim($_REQUEST['in_tariff_code']);
+
+
+            date_default_timezone_set("Asia/Calcutta");   //India time (GMT+5:30)
+            $dbDateTime = date('Y-m-d H:i:s');
+            $fastag_tid = trim($_REQUEST['fastag_tid']);
+            $fastag_epcid = trim($_REQUEST['fastag_epcid']);
+            $user_memory = trim($_REQUEST['fastag_signature']);
+            $fastag_gate_id = trim($_REQUEST['fastag_gate_id']);
+
+            /*Start Sonu Code : Paytm transaction */
+            $bank_txn_id = trim($_REQUEST['bank_txn_id']);
+            $status = trim($_REQUEST['status']);
+            $rrn = trim($_REQUEST['rrn']);
+            $card_no = trim($_REQUEST['card_no']);
+            $order_id = trim($_REQUEST['order_id']);
+            $auth_code = trim($_REQUEST['auth_code']);
+            $pay_method = trim($_REQUEST['pay_method']);
+            $amount = trim($_REQUEST['amount']);
+            $card_type = trim($_REQUEST['card_type']);
+            $txn_date = trim($_REQUEST['txn_date']);
+            $error_msg = trim($_REQUEST['error_msg']);
+            $card_scheme = trim($_REQUEST['card_scheme']);
+            $issuing_bank = trim($_REQUEST['issuing_bank']);
+            $tid = trim($_REQUEST['tid']);
+            $aid = trim($_REQUEST['aid']);
+            $bank_mid = trim($_REQUEST['bank_mid']);
+            $bank_tid = trim($_REQUEST['bank_tid']);
+         /*End Sonu Code : Paytm transaction */
 
             $inData = array();
             if (!empty($_REQUEST['barcode'])) {
@@ -735,10 +1316,39 @@ switch ($_REQUEST['cmd']):
                     mysqli_query($conn, $sps_transaction_query);
                     $sps_transaction_id = mysqli_insert_id($conn);
                 } else {
-                    $sps_transaction_query = "UPDATE sps_transactions SET in_time='$in_time', in_gate='$ingate',vehicle_type='$vh_type',total_payment_amount= total_payment_amount +'$total_payment_amount',in_payment_amount='$in_payment_amount',f_eight=NULL,in_standard_parking_amount = '$in_standard_parking_amount',in_master_payment_mode = '$in_master_payment_mode',in_payment_mode = '$in_payment_mode',in_foc_note = '$foc_note',in_foc_approval = '$foc_approval',in_foc_reason = '$foc_reason',in_foc = '$foc',in_foc_difference = '$in_foc_difference',in_shift_id = '$shift_id',in_type_id = '$in_type_id',in_type = '$in_type',ticket_no = '$ticket_no',vehicle_number = '$vh_number',in_user_id = '$in_userid',in_day_type = '$in_day_type',in_tariff_code = '$in_tariff_code',in_membership_payment_amount = '$in_membership_payment_amount', in_payment_referance_number = '$in_payment_reference_number' WHERE id= '$transactionId' AND deleted_at IS NULL";
-                    $logString .= $sps_transaction_query . "\n" . PHP_EOL;
-                    mysqli_query($conn, $sps_transaction_query);
-                    $sps_transaction_id = $transactionId;
+                if($in_payment_mode == "8"){
+                    $tag_sign =  substr($user_memory, 28,-36);
+                    $sps_transaction_query = "UPDATE sps_transactions SET fastag_tag_signature='$tag_sign', fastag_epc ='$fastag_tid', fastag_id ='$fastag_epcid', entry_type = 'FASTag', exit_type = 'FASTag', fastag_exec_code = '00', fastag_exec_message = 'Active Tag', fastag_pay = 'pending', fastag_lane = '$fastag_gate_id', fastag_vehicle_no = '$vh_number', in_time='$in_time',in_gate='$ingate',vehicle_type='$vh_type',total_payment_amount= total_payment_amount +'$total_payment_amount',in_payment_amount='$in_payment_amount',f_eight=NULL,in_standard_parking_amount = '$in_standard_parking_amount',in_master_payment_mode = '$in_master_payment_mode',in_payment_mode = '$in_payment_mode',in_foc_note = '$foc_note',in_foc_approval = '$foc_approval',in_foc_reason = '$foc_reason',in_foc = '$foc',in_foc_difference = '$in_foc_difference',in_shift_id = '$shift_id',in_type_id = '$in_type_id',in_type = '$in_type',ticket_no = '$ticket_no',vehicle_number = '$vh_number',in_user_id = '$in_userid',in_day_type = '$in_day_type',in_tariff_code = '$in_tariff_code',in_membership_payment_amount = '$in_membership_payment_amount', in_payment_referance_number = '$in_payment_reference_number' WHERE id= '$transactionId' AND deleted_at IS NULL";
+
+                    $logString.= $sps_transaction_query."\n".PHP_EOL;
+
+                    $sps_transaction_id_for_fastag_entires = $transactionId;
+                    $queryInsertFastagEntries = "INSERT INTO `sps_fastag_entries` (`id`, `txn_id`, `fastag_id`, `fastag_no`, `cron_status`, `tag_status`, `vehicle_no`, `exccode`, `comvehicle`, `used_for_payment`, `tag_signature_data_hex`, `tag_vrn`, `issuer_bank_id`, `tag_v_class`, `rfu`, `epc_id`, `user_memory`, `tag_whitelist_status`, `created_at`, `updated_at`, `deleted_at`) VALUES (NULL, '$sps_transaction_id_for_fastag_entires', '$fastag_epcid', '$fastag_tid', '0', NULL, '$vh_number', NULL, NULL, '1', '$tag_sign', NULL, NULL, NULL, NULL, '$fastag_epcid', '$user_memory', NULL, '$dbDateTime', '$dbDateTime', NULL)";
+
+                    $logString.= $queryInsertFastagEntries."\n".PHP_EOL;
+                    mysqli_query($conn, $queryInsertFastagEntries);
+
+                }else{
+
+                    $sps_transaction_query = "UPDATE sps_transactions SET fastag_tag_signature='$fastag_signature', fastag_epc ='$fastag_tid', fastag_id ='$fastag_epcid', in_time='$in_time', in_gate='$ingate',vehicle_type='$vh_type',total_payment_amount= total_payment_amount +'$total_payment_amount',in_payment_amount='$in_payment_amount',f_eight=NULL,in_standard_parking_amount = '$in_standard_parking_amount',in_master_payment_mode = '$in_master_payment_mode',in_payment_mode = '$in_payment_mode',in_foc_note = '$foc_note',in_foc_approval = '$foc_approval',in_foc_reason = '$foc_reason',in_foc = '$foc',in_foc_difference = '$in_foc_difference',in_shift_id = '$shift_id',in_type_id = '$in_type_id',in_type = '$in_type',ticket_no = '$ticket_no',vehicle_number = '$vh_number',in_user_id = '$in_userid',in_day_type = '$in_day_type',in_tariff_code = '$in_tariff_code',in_membership_payment_amount = '$in_membership_payment_amount', in_payment_referance_number = '$in_payment_reference_number' WHERE id= '$transactionId' AND deleted_at IS NULL";
+
+                    // old code comment by sonu
+                    // $sps_transaction_query = "UPDATE sps_transactions SET in_time='$in_time', in_gate='$ingate',vehicle_type='$vh_type',total_payment_amount= total_payment_amount +'$total_payment_amount',in_payment_amount='$in_payment_amount',f_eight=NULL,in_standard_parking_amount = '$in_standard_parking_amount',in_master_payment_mode = '$in_master_payment_mode',in_payment_mode = '$in_payment_mode',in_foc_note = '$foc_note',in_foc_approval = '$foc_approval',in_foc_reason = '$foc_reason',in_foc = '$foc',in_foc_difference = '$in_foc_difference',in_shift_id = '$shift_id',in_type_id = '$in_type_id',in_type = '$in_type',ticket_no = '$ticket_no',vehicle_number = '$vh_number',in_user_id = '$in_userid',in_day_type = '$in_day_type',in_tariff_code = '$in_tariff_code',in_membership_payment_amount = '$in_membership_payment_amount', in_payment_referance_number = '$in_payment_reference_number' WHERE id= '$transactionId' AND deleted_at IS NULL";
+                    $logString.= $sps_transaction_query."\n".PHP_EOL;
+                }
+
+                mysqli_query($conn, $sps_transaction_query);
+
+                $sps_transaction_id = $transactionId;
+
+                if($in_payment_mode == "9"){
+                    $paytmCardQuery = "INSERT INTO `sps_paytm_txn` (`id`, `txn_id`, `bank_txn_id`, `status`, `rrn`, `card_no`, `order_id`, `auth_code`, `pay_method`, `amount`, `card_type`, `txn_date`, `error_msg`, `card_scheme`, `issuing_bank`, `tid`, `aid`, `bank_mid`, `bank_tid`, `created_at`, `deleted_at`) VALUES (NULL, '$transactionId', '$bank_txn_id', '$status', '$rrn', '$card_no', '$order_id', '$auth_code', '$pay_method', '$amount', '$card_type', '$txn_date', '$error_msg', '$card_scheme', '$issuing_bank', '$tid', '$aid', '$bank_mid', '$bank_tid', '$dbDateTime', NULL)";
+                    mysqli_query($conn, $paytmCardQuery);
+                }
+                if($in_payment_mode == "10"){
+                    $paytmUpiQuery = "INSERT INTO `sps_paytm_txn` (`id`, `txn_id`, `bank_txn_id`, `status`, `rrn`, `card_no`, `order_id`, `auth_code`, `pay_method`, `amount`, `card_type`, `txn_date`, `error_msg`, `card_scheme`, `issuing_bank`, `tid`, `aid`, `bank_mid`, `bank_tid`, `created_at`, `deleted_at`) VALUES (NULL, '$transactionId', '$bank_txn_id', '$status', '$rrn', '$card_no', '$order_id', '$auth_code', '$pay_method', '$amount', '$card_type', '$txn_date', '$error_msg', '$card_scheme', '$issuing_bank', '$tid', '$aid', '$bank_mid', '$bank_tid', '$dbDateTime', NULL)";
+                    mysqli_query($conn, $paytmUpiQuery);
+                }
                 }
 
                 if ($sps_transaction_id) {
@@ -842,9 +1452,9 @@ switch ($_REQUEST['cmd']):
                             out_type='$in_type',
                             out_type_id='$in_type_id'
                             WHERE id= '$sps_transaction_id'";
-                        //echo 'update_transactions=>'.$update_transactions;exit;                        
+                        //echo 'update_transactions=>'.$update_transactions;exit;
                         mysqli_query($conn, $update_transactions);
-                        $logString .= $update_transactions . "\n" . PHP_EOL;
+                        $logString .= $update_transactions . "\n" . PHP_EOL;                        
                     }
                     if ($_FILES) {
                         /*---- creating image name using type of image, timestamp and transaction id ----*/
@@ -1133,7 +1743,7 @@ switch ($_REQUEST['cmd']):
         $gate_id = trim($_REQUEST['gate_id']);
         $type = trim($_REQUEST['type']);
 //        $startDate = date("Y-m-d", strtotime("-$count days", time()));
-//        $endDate = date('Y-m-d');                  
+//        $endDate = date('Y-m-d');
         $time = date('H:i:s');
 
         if (empty($vehicle_no)) {
@@ -1335,7 +1945,7 @@ switch ($_REQUEST['cmd']):
 
     case "transaction_exit":
 
-        /* US793: Dynamic QR Code – Mobile Gate 
+        /* US793: Dynamic QR Code – Mobile Gate
            Allowing to set payment reference number in case of master payment mode E wallet
         */
         if ($_REQUEST['out_master_payment_mode'] == 4 && ($_REQUEST['in_payment_mode'] == 5 || $_REQUEST['in_payment_mode'] == 7) && !empty($_REQUEST['out_payment_reference_number'])) {
@@ -1379,7 +1989,7 @@ switch ($_REQUEST['cmd']):
         $transactionId = $_REQUEST['transaction_id'];
         $out_time = $_REQUEST['out_time'];
 
-        // Get total time from sps_cps table for transaction_id 
+        // Get total time from sps_cps table for transaction_id
         $query_getSum = "SELECT SUM(cps_total_time) as cps_total_time FROM `sps_cps` WHERE transaction_id='" . $_REQUEST['transaction_id'] . "'";
         $logString .= $query_getSum . "\n" . PHP_EOL;
         $getSum = mysqli_fetch_assoc(mysqli_query($conn, $query_getSum));
@@ -1422,7 +2032,32 @@ switch ($_REQUEST['cmd']):
         $location_id = trim($_REQUEST['location_id']);;
         $area_id = trim($_REQUEST['area_id']);
 
-        /*Start : Sonu Code */
+        $fastag_tid = trim($_REQUEST['fastag_tid']);
+        $fastag_epcid = trim($_REQUEST['fastag_epcid']);
+        $user_memory = trim($_REQUEST['fastag_signature']);
+        $fastag_gate_id = trim($_REQUEST['fastag_gate_id']);
+
+         /*Start Sonu Code : Paytm transaction */
+        $bank_txn_id = trim($_REQUEST['bank_txn_id']);
+        $status = trim($_REQUEST['status']);
+        $rrn = trim($_REQUEST['rrn']);
+        $card_no = trim($_REQUEST['card_no']);
+        $order_id = trim($_REQUEST['order_id']);
+        $auth_code = trim($_REQUEST['auth_code']);
+        $pay_method = trim($_REQUEST['pay_method']);
+        $amount = trim($_REQUEST['amount']);
+        $card_type = trim($_REQUEST['card_type']);
+        $txn_date = trim($_REQUEST['txn_date']);
+        $error_msg = trim($_REQUEST['error_msg']);
+        $card_scheme = trim($_REQUEST['card_scheme']);
+        $issuing_bank = trim($_REQUEST['issuing_bank']);
+        $tid = trim($_REQUEST['tid']);
+        $aid = trim($_REQUEST['aid']);
+        $bank_mid = trim($_REQUEST['bank_mid']);
+        $bank_tid = trim($_REQUEST['bank_tid']);
+         /*End Sonu Code : Paytm transaction */
+
+        /*Start Sonu Code : Name, Mobile, Email added for exit transaction */
         date_default_timezone_set("Asia/Calcutta");   //India time (GMT+5:30)
         $dbDateTime = date('Y-m-d H:i:s');
         $custName = trim($_REQUEST['custName']);
@@ -1437,6 +2072,7 @@ switch ($_REQUEST['cmd']):
             if ($rowcount == 0) {
                 $queryInsertCustomerDetails = "INSERT INTO `sps_user_vehicle_contact_details` (`id`, `name`, `vehicle_number`, `email`, `mobile`, `location_id`, `area_id`, `superadmin`, `sync_at`, `created_by`, `updated_by`, `created_at`, `updated_at`, `deleted_at`) VALUES (NULL, '$custName', '$vehicleNumber', '$custEmail', '$custMobile', '$location_id', '$area_id', '0', NULL, '$out_userid', NULL, '$dbDateTime', '$dbDateTime', NULL)";
                 mysqli_query($conn, $queryInsertCustomerDetails);
+                $logString .= $queryInsertCustomerDetails . "\n" . PHP_EOL;
             }
         } else if (!empty($custName) && !empty($custMobile)) {
             $queryFetchVehicleData = "SELECT name,mobile FROM sps_user_vehicle_contact_details WHERE name = '$custName' and mobile = '$custMobile' and vehicle_number = '$vehicleNumber' LIMIT 1";
@@ -1445,6 +2081,7 @@ switch ($_REQUEST['cmd']):
             if ($rowcount == 0) {
                 $queryInsertCustomerDetails = "INSERT INTO `sps_user_vehicle_contact_details` (`id`, `name`, `vehicle_number`, `email`, `mobile`, `location_id`, `area_id`, `superadmin`, `sync_at`, `created_by`, `updated_by`, `created_at`, `updated_at`, `deleted_at`) VALUES (NULL, '$custName', '$vehicleNumber', '$custEmail', '$custMobile', '$location_id', '$area_id', '0', NULL, '$out_userid', NULL, '$dbDateTime', '$dbDateTime', NULL)";
                 mysqli_query($conn, $queryInsertCustomerDetails);
+                $logString .= $queryInsertCustomerDetails . "\n" . PHP_EOL;
             }
         } else if (!empty($custName) && !empty($custEmail)) {
             $queryFetchVehicleData = "SELECT name,mobile FROM sps_user_vehicle_contact_details WHERE name = '$custName' and email = '$custEmail' and vehicle_number = '$vehicleNumber' LIMIT 1";
@@ -1453,6 +2090,7 @@ switch ($_REQUEST['cmd']):
             if ($rowcount == 0) {
                 $queryInsertCustomerDetails = "INSERT INTO `sps_user_vehicle_contact_details` (`id`, `name`, `vehicle_number`, `email`, `mobile`, `location_id`, `area_id`, `superadmin`, `sync_at`, `created_by`, `updated_by`, `created_at`, `updated_at`, `deleted_at`) VALUES (NULL, '$custName', '$vehicleNumber', '$custEmail', NULL, '$location_id', '$area_id', '0', NULL, '$out_userid', NULL, '$dbDateTime', '$dbDateTime', NULL)";
                 mysqli_query($conn, $queryInsertCustomerDetails);
+                $logString .= $queryInsertCustomerDetails . "\n" . PHP_EOL;
             }
         } else if (!empty($custMobile) && !empty($custEmail)) {
             $queryFetchVehicleData = "SELECT name,mobile FROM sps_user_vehicle_contact_details WHERE mobile = '$custMobile' and email = '$custEmail' and vehicle_number = '$vehicleNumber' LIMIT 1";
@@ -1461,6 +2099,7 @@ switch ($_REQUEST['cmd']):
             if ($rowcount == 0) {
                 $queryInsertCustomerDetails = "INSERT INTO `sps_user_vehicle_contact_details` (`id`, `name`, `vehicle_number`, `email`, `mobile`, `location_id`, `area_id`, `superadmin`, `sync_at`, `created_by`, `updated_by`, `created_at`, `updated_at`, `deleted_at`) VALUES (NULL, '$custName', '$vehicleNumber', '$custEmail', '$custMobile', '$location_id', '$area_id', '0', NULL, '$out_userid', NULL, '$dbDateTime', '$dbDateTime', NULL)";
                 mysqli_query($conn, $queryInsertCustomerDetails);
+                $logString .= $queryInsertCustomerDetails . "\n" . PHP_EOL;
             }
         } else if (!empty($custName)) {
             $queryFetchVehicleData = "SELECT name,mobile FROM sps_user_vehicle_contact_details WHERE name = '$custName' and vehicle_number = '$vehicleNumber' LIMIT 1";
@@ -1469,6 +2108,7 @@ switch ($_REQUEST['cmd']):
             if ($rowcount == 0) {
                 $queryInsertCustomerDetails = "INSERT INTO `sps_user_vehicle_contact_details` (`id`, `name`, `vehicle_number`, `email`, `mobile`, `location_id`, `area_id`, `superadmin`, `sync_at`, `created_by`, `updated_by`, `created_at`, `updated_at`, `deleted_at`) VALUES (NULL, '$custName', '$vehicleNumber', '$custEmail', NULL, '$location_id', '$area_id', '0', NULL,'$out_userid', NULL, '$dbDateTime', '$dbDateTime', NULL)";
                 mysqli_query($conn, $queryInsertCustomerDetails);
+                $logString .= $queryInsertCustomerDetails . "\n" . PHP_EOL;
             }
         } else if (!empty($custMobile)) {
             $queryFetchVehicleData = "SELECT name,mobile FROM sps_user_vehicle_contact_details WHERE mobile = '$custMobile' and vehicle_number = '$vehicleNumber' LIMIT 1";
@@ -1477,6 +2117,7 @@ switch ($_REQUEST['cmd']):
             if ($rowcount == 0) {
                 $queryInsertCustomerDetails = "INSERT INTO `sps_user_vehicle_contact_details` (`id`, `name`, `vehicle_number`, `email`, `mobile`, `location_id`, `area_id`, `superadmin`, `sync_at`, `created_by`, `updated_by`, `created_at`, `updated_at`, `deleted_at`) VALUES (NULL, '$custName', '$vehicleNumber', '$custEmail', '$mobile', '$location_id', '$area_id', '0', NULL, '$out_userid', NULL, '$dbDateTime', '$dbDateTime', NULL)";
                 mysqli_query($conn, $queryInsertCustomerDetails);
+                $logString .= $queryInsertCustomerDetails . "\n" . PHP_EOL;
             }
         } else if (!empty($custEmail)) {
             $queryFetchVehicleData = "SELECT name,mobile FROM sps_user_vehicle_contact_details WHERE email = '$custEmail' and vehicle_number = '$vehicleNumber' LIMIT 1";
@@ -1485,9 +2126,11 @@ switch ($_REQUEST['cmd']):
             if ($rowcount == 0) {
                 $queryInsertCustomerDetails = "INSERT INTO `sps_user_vehicle_contact_details` (`id`, `name`, `vehicle_number`, `email`, `mobile`, `location_id`, `area_id`, `superadmin`, `sync_at`, `created_by`, `updated_by`, `created_at`, `updated_at`, `deleted_at`) VALUES (NULL, '$custName', '$vehicleNumber', '$custEmail', NULL, '$location_id', '$area_id', '0', NULL, '$out_userid', NULL, '$dbDateTime', '$dbDateTime', NULL)";
                 mysqli_query($conn, $queryInsertCustomerDetails);
+                $logString .= $queryInsertCustomerDetails . "\n" . PHP_EOL;
             }
         }
-        /*End : Sonu Code */
+        createLog($logString);
+        /*Start Sonu Code : Name, Mobile, Email added for exit transaction */
 
         if (empty($transactionId)) {
             $inData = array();
@@ -1550,7 +2193,7 @@ switch ($_REQUEST['cmd']):
 
 
                 } else {
-                    //$inData = array('barcode' => $_REQUEST['barcode'], 'offline_ticket' => 3);                    
+                    //$inData = array('barcode' => $_REQUEST['barcode'], 'offline_ticket' => 3);
                     $inData = array('barcode' => $_REQUEST['barcode'], 'vehicle_type' => $_REQUEST['vehicle_type'], 'vehicle_number' => $_REQUEST['vehicle_number'], 'in_gate' => $gateId, 'in_time' => $entry_time, 'in_time' => $entry_time, 'in_type' => $in_type, 'in_type_id' => $in_type_id);
                     if (isset($_REQUEST['offline_ticket']) && $_REQUEST['offline_ticket'] == 3) {
                         $inData['offline_ticket'] = 3;
@@ -1708,7 +2351,32 @@ switch ($_REQUEST['cmd']):
             }*/
             // DE609 - in below query ticket number and out_type_id is added.
             //out_membership_payment_amount and total_payment_amount added in below query
-            $updatetransactions_lost = "UPDATE sps_transactions SET ticket_no = '$ticket_no', lost_ticket_penalty = '$lost_ticket_penalty',vehicle_type = '$vehicle_type',out_time='$out_time',total_time = '$total_time', out_gate='$outgate',out_user_id='$out_userid',out_payment_amount='$payment_amount',out_payment_mode='$out_payment_mode',out_master_payment_mode='$out_master_payment_mode',out_shift_id = '$out_shift_id',penalty_charge = '$penalty_charge',overnight_charges = '$overnight_charges',out_type = '$out_type',out_type_id = '$out_type_id',out_standard_parking_amount = '$out_standard_parking_amount', out_day_type= '$outDayType',out_membership_payment_amount='$out_membership_payment_amount',total_payment_amount='$total_payment_amount',";
+            /* Below Comment by sonu */
+
+            if($out_payment_mode == "8"){
+                $tag_sign =  substr($user_memory, 28,-36);
+                $updatetransactions_lost = "UPDATE sps_transactions SET fastag_tag_signature='$tag_sign', fastag_epc ='$fastag_tid', fastag_id ='$fastag_epcid', exit_type = 'FASTag', fastag_exec_code = '00', fastag_exec_message = 'Active Tag', fastag_pay = 'pending', fastag_lane = '$fastag_gate_id', fastag_vehicle_no = '$vehicle_number' ,ticket_no = '$ticket_no', lost_ticket_penalty = '$lost_ticket_penalty',vehicle_type = '$vehicle_type',out_time='$out_time',total_time = '$total_time', out_gate='$outgate',out_user_id='$out_userid',out_payment_amount='$payment_amount',out_payment_mode='$out_payment_mode',out_master_payment_mode='$out_master_payment_mode',out_shift_id = '$out_shift_id',penalty_charge = '$penalty_charge',overnight_charges = '$overnight_charges',out_type = '$out_type',out_type_id = '$out_type_id',out_standard_parking_amount = '$out_standard_parking_amount', out_day_type= '$outDayType',out_membership_payment_amount='$out_membership_payment_amount',total_payment_amount='$total_payment_amount',";
+    
+                $sps_transaction_id_for_fastag_entires = $transaction['id'];
+    
+                $queryInsertFastagEntries = "INSERT INTO `sps_fastag_entries` (`id`, `txn_id`, `fastag_id`, `fastag_no`, `cron_status`, `tag_status`, `vehicle_no`, `exccode`, `comvehicle`, `used_for_payment`, `tag_signature_data_hex`, `tag_vrn`, `issuer_bank_id`, `tag_v_class`, `rfu`, `epc_id`, `user_memory`, `tag_whitelist_status`, `created_at`, `updated_at`, `deleted_at`) VALUES (NULL, '$sps_transaction_id_for_fastag_entires', '$fastag_epcid', '$fastag_tid', '0', NULL, '$vehicleNumber', NULL, NULL, '1', '$tag_sign', NULL, NULL, NULL, NULL, '$fastag_epcid', '$user_memory', NULL, '$dbDateTime', '$dbDateTime', NULL)";
+                mysqli_query($conn, $queryInsertFastagEntries);
+            }
+            else{
+                $updatetransactions_lost = "UPDATE sps_transactions SET ticket_no = '$ticket_no', lost_ticket_penalty = '$lost_ticket_penalty',vehicle_type = '$vehicle_type',out_time='$out_time',total_time = '$total_time', out_gate='$outgate',out_user_id='$out_userid',out_payment_amount='$payment_amount',out_payment_mode='$out_payment_mode',out_master_payment_mode='$out_master_payment_mode',out_shift_id = '$out_shift_id',penalty_charge = '$penalty_charge',overnight_charges = '$overnight_charges',out_type = '$out_type',out_type_id = '$out_type_id',out_standard_parking_amount = '$out_standard_parking_amount', out_day_type= '$outDayType',out_membership_payment_amount='$out_membership_payment_amount',total_payment_amount='$total_payment_amount',";
+            }
+
+            if($out_payment_mode == "9"){
+                $txnId = $transaction['id'];
+                $paytmCardQuery = "INSERT INTO `sps_paytm_txn` (`id`, `txn_id`, `bank_txn_id`, `status`, `rrn`, `card_no`, `order_id`, `auth_code`, `pay_method`, `amount`, `card_type`, `txn_date`, `error_msg`, `card_scheme`, `issuing_bank`, `tid`, `aid`, `bank_mid`, `bank_tid`, `created_at`, `deleted_at`) VALUES (NULL, '$txnId', '$bank_txn_id', '$status', '$rrn', '$card_no', '$order_id', '$auth_code', '$pay_method', '$amount', '$card_type', '$txn_date', '$error_msg', '$card_scheme', '$issuing_bank', '$tid', '$aid', '$bank_mid', '$bank_tid', '$dbDateTime', NULL)";
+                mysqli_query($conn, $paytmCardQuery);
+            }
+            if($out_payment_mode == "10"){
+                $txnId = $transaction['id'];
+                $paytmUpiQuery = "INSERT INTO `sps_paytm_txn` (`id`, `txn_id`, `bank_txn_id`, `status`, `rrn`, `card_no`, `order_id`, `auth_code`, `pay_method`, `amount`, `card_type`, `txn_date`, `error_msg`, `card_scheme`, `issuing_bank`, `tid`, `aid`, `bank_mid`, `bank_tid`, `created_at`, `deleted_at`) VALUES (NULL, '$txnId', '$bank_txn_id', '$status', '$rrn', '$card_no', '$order_id', '$auth_code', '$pay_method', '$amount', '$card_type', '$txn_date', '$error_msg', '$card_scheme', '$issuing_bank', '$tid', '$aid', '$bank_mid', '$bank_tid', '$dbDateTime', NULL)";
+                mysqli_query($conn, $paytmUpiQuery);
+            }
+
             if (!is_null($foc))
                 $updatetransactions_lost .= " out_foc = '$foc',";
             if (!is_null($foc_difference))
@@ -2636,7 +3304,7 @@ switch ($_REQUEST['cmd']):
                 LEFT JOIN sps_transactions AS st ON st.id = cps.transaction_id
                 LEFT JOIN sps_gate_configurations AS sgc ON cps.cps_gate = sgc.gate_id
                 LEFT JOIN sps_users AS su ON cps.cps_user_id = su.user_id
-                WHERE cps.deleted_at IS NULL AND st.out_gate IS NULL";//no change        
+                WHERE cps.deleted_at IS NULL AND st.out_gate IS NULL";//no change
         if (!empty($cps_barcode)) {
             $check_query = "select sps.out_time,sps.out_gate from sps_transactions sps left join sps_cps cps on sps.barcode = cps.receipt_barcode where sps.deleted_at is NULL and cps.cps_barcode = '" . $cps_barcode . "'";
             $check_query .= "  ORDER BY id DESC limit 1";
@@ -2807,7 +3475,7 @@ switch ($_REQUEST['cmd']):
     /* added for insert CPS */
     case 'cps_transaction':
 
-        /* US793: Dynamic QR Code – Mobile Gate 
+        /* US793: Dynamic QR Code – Mobile Gate
            Allowing to set payment reference number in case of master payment mode E wallet
         */
         if ($_REQUEST['cps_master_payment_mode'] == 4 && ($_REQUEST['in_payment_mode'] == 5 || $_REQUEST['in_payment_mode'] == 7) && !empty($_REQUEST['cps_payment_reference_number'])) {
@@ -3222,13 +3890,6 @@ switch ($_REQUEST['cmd']):
         break;
     /* US793: Dynamic UPI QR Code API */
 
-    case 'sonu':   
-        $response = json_encode(array('err_code' => '2201', 'err_msg' => 'Validation successful!'));
-            echo $response;
-            $logString .= $response . "\n" . PHP_EOL;
-            createLog($logString);
-            exit(); 
-
     case '':
         createLog($logString);
         break;
@@ -3405,225 +4066,7 @@ function isValidPaymentReferenceNumber($conn, $errors, &$logString, $payment_ref
     return true;
 }
 
-function createStickerMembershipData($baseUrl, $logString, $errors)
-{
-    try {
-        $response = curlCall($baseUrl . "/socket/sticker_membership/create", [], "GET");
-
-        if ($response['status']) {
-            $response['message'] = 'Sticker Membership Data received successfully';
-            $response_data = json_encode(array('err_code' => '0', 'data' => $response));
-            $logString .= $response_data . "\n" . PHP_EOL;
-            echo $response_data;
-            createLog($logString);
-            exit();
-        }
-
-        throw new Exception($response['message']);
-
-    } catch (Exception $e) {
-
-        $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
-        echo $response_data;
-        $logString .= $response_data . "\n" . PHP_EOL;
-        createLog($logString);
-        exit();
-    }
-}
-
-function getStickerMemberTariffDate($baseUrl, $logString, $errors)
-{
-    try {
-        $tariffId = $_REQUEST['tariff_id'];
-        $tariffCount = $_REQUEST['count'];
-        $response = curlCall($baseUrl . "/socket/sticker_membership/tariffdata/" . $tariffId, ['count' => $tariffCount], "GET");
-        if ($response['status']) {
-            $response['message'] = 'Sticker Tariff Data Listed Successfully';
-            $response_data = json_encode(array('err_code' => '0', 'data' => $response));
-            $logString .= $response_data . "\n" . PHP_EOL;
-            echo $response_data;
-            createLog($logString);
-            exit();
-        }
-
-        throw new Exception($response['message']);
-
-    } catch (Exception $e) {
-
-        $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
-        echo $response_data;
-        $logString .= $response_data . "\n" . PHP_EOL;
-        createLog($logString);
-        exit();
-    }
-}
-
-function getStickerMemberCalculateDate($baseUrl, $logString, $errors)
-{
-    try {
-        if (isset($_REQUEST['calenderProduct'])) {
-            $calenderProduct = $_REQUEST['calenderProduct'];
-            $useCurrentDate = $_REQUEST['useCurrentDate'];
-            $periodType = $_REQUEST['periodType'];
-            $periodLength = $_REQUEST['periodLength'];
-            $tolerance = $_REQUEST['tolerance'];
-            $requestData = [
-                'calenderProduct' => $calenderProduct,
-                'useCurrentDate' => $useCurrentDate,
-                'periodType' => $periodType,
-                'periodLength' => $periodLength,
-                'tolerance' => $tolerance,
-            ];
-
-        } else {
-            $startDate = $_REQUEST['startDate'];
-            $periodType = $_REQUEST['periodType'];
-            $periodLength = $_REQUEST['periodLength'];
-            $tolerance = $_REQUEST['tolerance'];
-            $requestData = [
-                'startDate' => $startDate,
-                'periodType' => $periodType,
-                'periodLength' => $periodLength,
-                'tolerance' => $tolerance,
-            ];
-        }
-
-        $response = curlCall($baseUrl . "/socket/sticker_membership/calculate_date", $requestData, "POST");
-        if ($response['status']) {
-            $response['message'] = 'Sticker Tariff Calculated Date Listed Successfully';
-            $response_data = json_encode(array('err_code' => '0', 'data' => $response));
-            $logString .= $response_data . "\n" . PHP_EOL;
-            echo $response_data;
-            createLog($logString);
-            exit();
-        }
-
-        throw new Exception($response['message']);
-
-    } catch (Exception $e) {
-
-        $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
-        echo $response_data;
-        $logString .= $response_data . "\n" . PHP_EOL;
-        createLog($logString);
-        exit();
-    }
-}
-
-function getStickerMemberFetchFastagId($baseUrl, $logString, $errors)
-{
-    try {
-        $vehicleNo = $_REQUEST['vehicleNo'];
-
-        $response = curlCall($baseUrl . "/socket/sticker_membership/fetch_fastag_id/" . $vehicleNo, [], "GET");
-
-        if ($response['status']) {
-            $response['message'] = 'Sticker Membership Fetch FASTag ID Successfully';
-            $response_data = json_encode(array('err_code' => '0', 'data' => $response));
-            $logString .= $response_data . "\n" . PHP_EOL;
-            echo $response_data;
-            createLog($logString);
-            exit();
-        }
-
-        throw new Exception($response['message']);
-
-    } catch (Exception $e) {
-
-        $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $e->getMessage()));
-        echo $response_data;
-        $logString .= $response_data . "\n" . PHP_EOL;
-        createLog($logString);
-        exit();
-    }
-}
-
-function getStickerMemberFetchVehicleNo($baseUrl, $logString, $errors)
-{
-    try {
-        $fastagId = $_REQUEST['fastagId'];
-
-        $response = curlCall($baseUrl . "/socket/sticker_membership/fetch_vehicle_no/" . $fastagId, [], "GET");
-
-        if ($response['status']) {
-            $response['message'] = 'Sticker Membership Fetch Vehicle No Successfully';
-            $response_data = json_encode(array('err_code' => '0', 'data' => $response));
-            $logString .= $response_data . "\n" . PHP_EOL;
-            echo $response_data;
-            createLog($logString);
-            exit();
-        }
-        throw new Exception($response['message']);
-
-    } catch (Exception $e) {
-
-        $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $errors['10006']));
-        echo $response_data;
-        $logString .= $response_data . "\n" . PHP_EOL;
-        createLog($logString);
-        exit();
-    }
-}
-
-function storeStickerMembershipData($baseUrl, $logString, $errors)
-{
-    /*---- Query to fetch password against username from sps_users ----*/
-
-    try {
-        $requestData = [
-            "member_id" => $_REQUEST['member_id'],
-            "area_id" => $_REQUEST['area_id'],
-            "location_id" => $_REQUEST['location_id'],
-            "membership_product" => $_REQUEST['membership_product'],
-            "hidden_sticker_membership_product_id" => $_REQUEST['hidden_sticker_membership_product_id'],
-            "tariff_name" => $_REQUEST['tariff_name'],
-            "tolerance" => $_REQUEST['tolerance'],
-            "tariff" => $_REQUEST['tariff'],
-            "vehicle_charge" => $_REQUEST['vehicle_charge'],
-            "new_card_charge" => $_REQUEST['new_card_charge'],
-            "extend_charge" => $_REQUEST['extend_charge'],
-            "vehicle_change_charge" => $_REQUEST['vehicle_change_charge'],
-            "from_time" => $_REQUEST['from_time'],
-            "to_time" => $_REQUEST['to_time'],
-            "duration" => $_REQUEST['duration'],
-            "tariff_charge" => $_REQUEST['tariff_charge'],
-            "payment_mode" => $_REQUEST['payment_mode'],
-            "membership_no" => $_REQUEST['membership_no'],
-            "status" => $_REQUEST['status'],
-            "membership_type" => $_REQUEST['membership_type'],
-            "reciept_hidden" => $_REQUEST['reciept_hidden'],
-            "period_to" => $_REQUEST['period_to'],
-            "period_from" => $_REQUEST['period_from'],
-            "card_deposite_fee" => $_REQUEST['card_deposite_fee'],
-            "vehicle_no" => json_encode($_REQUEST['vehicle_no']),
-            "fastag_id" => json_encode($_REQUEST['fastag_id']),
-            "vehicle_priority" => json_encode($_REQUEST['vehicle_priority']),
-            "created_by" => $_REQUEST['created_by']
-        ];
-
-        $response = curlCall($baseUrl . "/socket/sticker_membership", $requestData, "POST");
-
-        if ($response['status']) {
-            $response['message'] = 'Sticker Membership Store successfully';
-            $response_data = json_encode(array('err_code' => '0', 'data' => $response));
-            $logString .= $response_data . "\n" . PHP_EOL;
-            echo $response_data;
-            createLog($logString);
-            exit();
-        }
-
-        throw new Exception($response['message']);
-
-    } catch (Exception $e) {
-
-        $response_data = json_encode(array('err_code' => '10006', 'err_msg' => $e->getMessage()));
-        echo $response_data;
-        $logString .= $response_data . "\n" . PHP_EOL;
-        createLog($logString);
-        exit();
-    }
-}
-
+/* Start : Arun code */
 
 function curlCall($apiURL, $requestParamList, $method = "POST")
 {
@@ -3650,3 +4093,5 @@ function curlCall($apiURL, $requestParamList, $method = "POST")
         return false;
     }
 }
+
+/* End : Arun code */

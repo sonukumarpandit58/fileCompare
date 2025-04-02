@@ -1,0 +1,211 @@
+{
+  "client": "47000",
+  "instId": "47",
+  "id": "",
+  "channel": "BPCL",
+  "reqDate": "20250402",
+  "reqTime": "161734",
+  "userName": "9716325888",
+  "mid": "470000099309183",
+  "tid": "39287941",
+  "billerTranList": [
+    {
+      "mid": "470000099309183",
+      "tid": "39287941",
+      "auth_code": "",
+      "inv_code": "a37f23d4-b684-4935-9f83-436cbbd7962e",
+      "trans_type": "PURCHASE",
+      "trans_status": "SUCCESS",
+      "tran_amt": "120.0",
+      "tran_date": "02042025",
+      "tran_time": "161731",
+      "rrn": "EXWrEiPBxa",
+      "card_first": "",
+      "card_last": "",
+      "ft_number": "4081220306",
+      "session_id": "",
+      "cust_id": "9716325888",
+      "pay_method": "UFILL1",
+      "authAmt": "120.0",
+      "refundAmt": "0",
+      "balanceAmt": "120.0",
+      "field1": "Online",
+      "field2": "",
+      "field3": "IM4487870420240820120652",
+      "field4": "",
+      "field5": "",
+      "field6": "",
+      "field7": "",
+      "field8": "",
+      "field9": "",
+      "field10": "",
+      "field11": "",
+      "field12": "",
+      "field13": "",
+      "field14": "",
+      "field15": "",
+      "paramList": [
+        {
+          "param": "Sonu Kumar Pandit",
+          "param_lit": "Attendant Name"
+        },
+        {
+          "param": "9716325888",
+          "param_lit": "Attendant ID"
+        },
+        {
+          "param": "",
+          "param_lit": "XCoverage"
+        },
+        {
+          "param": "",
+          "param_lit": "CHARGESLIP"
+        },
+        {
+          "param": "158698",
+          "param_lit": "SAP CODE"
+        },
+        {
+          "param": "",
+          "param_lit": "Customer Mobile"
+        },
+        {
+          "param": "",
+          "param_lit": "Vehicle ID"
+        },
+        {
+          "param": "02",
+          "param_lit": "PUMP_NO"
+        },
+        {
+          "param": "00",
+          "param_lit": "NOZZLE"
+        },
+        {
+          "param": "1.27",
+          "param_lit": "QUANTITY"
+        },
+        {
+          "param": "MS",
+          "param_lit": "PROD_NAME"
+        },
+        {
+          "param": "BPCL1.0.119",
+          "param_lit": "VERSION"
+        },
+        {
+          "param": "94.68",
+          "param_lit": "UNIT_PRICE"
+        },
+        {
+          "param": "0.00",
+          "param_lit": "CUSTOMER_DISC"
+        },
+        {
+          "param": "",
+          "param_lit": "ORDER_ID"
+        },
+        {
+          "param": "20240812174801",
+          "param_lit": "FCC TIMESTAMP"
+        },
+        {
+          "param": "pos test1",
+          "param_lit": "MERCH NAME"
+        },
+        {
+          "param": "",
+          "param_lit": "Vehicle_Type"
+        },
+        {
+          "param": "4081220306",
+          "param_lit": "globalTxnID"
+        },
+        {
+          "param": "4081220306",
+          "param_lit": "FCCTxnID"
+        },
+        {
+          "param": "1",
+          "param_lit": "localProductID"
+        },
+        {
+          "param": "1.27",
+          "param_lit": "quantityLitres"
+        },
+        {
+          "param": "120.0",
+          "param_lit": "amountRs"
+        },
+        {
+          "param": "120.0",
+          "param_lit": "rspRs"
+        },
+        {
+          "param": "",
+          "param_lit": "discountID"
+        },
+        {
+          "param": "0.00",
+          "param_lit": "discountAmountRs"
+        },
+        {
+          "param": "120.0",
+          "param_lit": "netAmountRs"
+        },
+        {
+          "param": "2",
+          "param_lit": "localBayID"
+        },
+        {
+          "param": "0",
+          "param_lit": "localNozzleID"
+        },
+        {
+          "param": "0",
+          "param_lit": "localMPD_ID"
+        },
+        {
+          "param": "110",
+          "param_lit": "txnType"
+        },
+        {
+          "param": "Amount",
+          "param_lit": "presetType"
+        },
+        {
+          "param": "",
+          "param_lit": "presetQuantity"
+        },
+        {
+          "param": "80.0",
+          "param_lit": "presetAmount"
+        },
+        {
+          "param": "2024-08-12T17:48:01.000Z",
+          "param_lit": "auditInfoReceivedAtAPOS"
+        },
+        {
+          "param": "2025-04-02T17:47:37.000Z",
+          "param_lit": "txnStartTime"
+        },
+        {
+          "param": "2025-04-02T16:17:34.000Z",
+          "param_lit": "txnEndTime"
+        },
+        {
+          "param": "80.0",
+          "param_lit": "prebookAmount"
+        },
+        {
+          "param": "a37f23d4-b684-4935-9f83-436cbbd7962e",
+          "param_lit": "prebookTxn"
+        },
+        {
+          "param": "2024-08-20T12:06:52.000Z",
+          "param_lit": "prebookTxnTime"
+        }
+      ]
+    }
+  ]
+}

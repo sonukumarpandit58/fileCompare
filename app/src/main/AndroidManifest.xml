@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="com.pax.permission.ICC" />
+    <uses-permission android:name="com.pax.permission.PICC" />
+    <uses-permission android:name="com.pax.permission.MAGCARD" />
+    <uses-permission android:name="com.pax.permission.PRINTER" />
+    <uses-permission android:name="com.pax.permission.PED" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <uses-feature android:name="android.hardware.camera" />
+    <uses-feature android:name="android.hardware.camera.autofocus" />
+
+    <uses-permission android:name="android.permission.FLASHLIGHT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission
+        android:name="android.permission.READ_PRIVILEGED_PHONE_STATE"
+        tools:ignore="ProtectedPermissions" />
+
+    <uses-feature android:name="android.hardware.camera" />
+    <uses-feature
+        android:name="android.hardware.bluetooth_le"
+        android:required="true" />
+
+    <application
+        android:requestLegacyExternalStorage="true"
+        android:name=".MyApplication"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:debuggable="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@drawable/logo"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.BPCLUAT"
+        tools:ignore="HardcodedDebugMode"
+        tools:targetApi="31">
+        <activity
+            android:name=".alp.alpOperations.cardManagement.enroll_additional.EnrollCardPayActivity"
+            android:exported="false" />
+        <activity
+            android:name=".alp.alpOperations.cardManagement.enroll_additional.EnrollReciept"
+            android:exported="false" />
+        <activity
+            android:name=".alp.alpOperations.utility.alpVoid.AlpVoidReceipt"
+            android:exported="false" />
+        <activity
+            android:name=".alp.alpOperations.cardManagement.balanceEnquiry.BalanceEnquiryReciept"
+            android:exported="false" />
+        <activity
+            android:name=".alp.alpOperations.utility.ShiftSummary.ShiftSummaryReciept"
+            android:exported="false" />
+        <activity
+            android:name=".alp.alpOperations.utility.reprint.Receipt"
+            android:exported="false"
+            android:theme="@style/Theme.BPCLUAT" />
+        <activity
+            android:name=".alp.alpOperations.utility.alpVoid.AlpVoidTransactions"
+            android:exported="false" />
+        <activity
+            android:name=".ufill.UfillPresetActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ufill.void_transaction.VoidReceipt"
+            android:exported="false" />
+        <activity
+            android:name=".ufill.UfillSuccessActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ufill.VoucherRedeemActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ufill.void_transaction.VoidTransaction"
+            android:exported="false" />
+        <activity
+            android:name=".ufill.ufil1.UfillScannerActivity"
+            android:exported="false" />
+        <activity
+            android:name=".CustomCameraActivity"
+            android:exported="false" />
+        <activity
+            android:name=".FirstTimeOperatorLoginActivity"
+            android:exported="false" />
+        <activity
+            android:name=".nfr.NfrTxnFailedActivity"
+            android:exported="false" />
+        <activity
+            android:name=".cng.CngTxnFailedActivity"
+            android:exported="false" />
+        <activity
+            android:name=".nfr.NfrSuccessActivity"
+            android:exported="false"
+            android:theme="@style/Theme.BPCLUAT" />
+        <activity
+            android:name=".nfr.NfrPaymentActivity"
+            android:exported="false" />
+        <activity
+            android:name=".UpdateOperatorDetailsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".cng.CngSuccessActivity"
+            android:exported="false" />
+        <activity
+            android:name=".TxnFailedActivity"
+            android:exported="false" />
+        <activity
+            android:name=".TmuLoginActivity"
+            android:exported="false" />
+        <activity
+            android:name=".nfr.NfrCartActivity"
+            android:exported="false" />
+        <activity
+            android:name=".nfr.NfrProductAddActivity"
+            android:exported="false" />
+        <activity
+            android:name=".cng.CngPaymentActivity"
+            android:exported="false" />
+        <activity
+            android:name=".AdminSideBarActivity"
+            android:exported="false" />
+        <activity
+            android:name=".AdminLoginActivity"
+            android:exported="false" />
+        <activity
+            android:name=".SuccessActivity"
+            android:exported="false" />
+        <activity
+            android:name=".PaymentActivity"
+            android:exported="false" />
+        <activity
+            android:name=".SideBarActivity"
+            android:exported="false" />
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service android:name=".receiver.InternetCheckService" />
+    </application>
+
+</manifest>

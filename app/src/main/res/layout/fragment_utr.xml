@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    tools:context=".ufill.utr.UtrFragment">
+
+    <include
+        android:id="@+id/toolbar"
+        layout="@layout/toolbar_with_back" />
+
+    <EditText
+        android:id="@+id/utrNumber"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="10dp"
+        android:layout_marginTop="6dp"
+        android:layout_marginRight="10dp"
+        android:inputType="number"
+        android:hint="Enter UTR"
+        android:text=""
+        android:maxLength="20"
+        android:minHeight="48dp" />
+
+    <EditText
+        android:id="@+id/voucherDate"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="10dp"
+        android:layout_marginTop="6dp"
+        android:layout_marginRight="10dp"
+        android:focusable="false"
+        android:focusableInTouchMode="false"
+        android:drawableRight="@drawable/baseline_calendar_month_24"
+        android:hint="Voucher Date"
+        android:inputType="number"
+        android:minHeight="48dp" />
+
+    <EditText
+        android:id="@+id/payAmount"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="10dp"
+        android:layout_marginTop="6dp"
+        android:layout_marginRight="10dp"
+        android:hint="Payment Amount"
+        android:inputType="numberDecimal"
+        android:maxLength="18"
+        android:text=""
+        android:minHeight="48dp" />
+
+    <androidx.appcompat.widget.AppCompatButton
+        style="@android:style/Widget.Button"
+        android:id="@+id/utrFetchBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="@color/white"
+        android:textSize="18sp"
+        android:layout_marginLeft="15dp"
+        android:layout_marginTop="10dp"
+        android:layout_marginBottom="15dp"
+        android:layout_marginRight="15dp"
+        android:background="@drawable/voilet_button_bg"
+        android:text="Fetch Voucher Details" />
+
+    <ImageView
+        android:id="@+id/imageView7"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:layout_gravity="center"
+        android:layout_marginTop="400dp"
+
+        android:layout_marginBottom="48dp"
+        android:src="@drawable/fiserv_logo" />
+
+</LinearLayout>

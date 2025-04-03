@@ -1,0 +1,491 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    tools:context=".alp.alpConfiguration.alpFeatures.configurationFragment">
+
+    <include
+        android:id="@+id/toolbar"
+        layout="@layout/toolbar" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="10dp"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="18sp"
+                android:layout_marginBottom="5dp"
+                android:background="@color/lightGray"
+                android:weightSum="2"
+                android:elevation="0dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textColor="@color/green"
+                    android:text="Recharge Allowed">
+
+                </TextView>
+
+                <TextView
+                    android:id="@+id/rechargeAllowed"
+                    android:gravity="end"
+                    android:layout_width="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content">
+
+                </TextView>
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="18sp"
+                android:layout_marginBottom="5dp"
+                android:background="@color/lightGray"
+                android:weightSum="2"
+                android:elevation="0dp">
+
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textColor="@color/green"
+                    android:text="Petromiles Allowed">
+
+                </TextView>
+
+                <TextView
+                    android:id="@+id/petromilesId"
+                    android:gravity="end"
+                    android:layout_width="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    >
+
+                </TextView>
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="18sp"
+                android:layout_marginBottom="5dp"
+                android:background="@color/lightGray"
+                android:weightSum="2"
+                android:elevation="0dp">
+
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textColor="@color/green"
+                    android:text="Non Sap Allowed">
+
+                </TextView>
+
+                <TextView
+                    android:id="@+id/nonSapId"
+                    android:gravity="end"
+                    android:layout_width="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    >
+
+                </TextView>
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="18sp"
+                android:layout_marginBottom="5dp"
+                android:background="@color/lightGray"
+                android:weightSum="2"
+                android:elevation="0dp">
+
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textColor="@color/green"
+                    android:text="Loyality Sale Limit">
+
+                </TextView>
+
+                <TextView
+                    android:id="@+id/loylitySaleId"
+                    android:gravity="end"
+                    android:layout_width="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                   >
+
+                </TextView>
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="18sp"
+                android:layout_marginBottom="5dp"
+                android:background="@color/lightGray"
+                android:weightSum="2"
+                android:elevation="0dp">
+
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textColor="@color/green"
+                    android:text="Sale Sub Type Allowed">
+
+                </TextView>
+
+                <TextView
+                    android:id="@+id/saleSubTypeId"
+                    android:gravity="end"
+                    android:layout_width="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content">
+                </TextView>
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="18sp"
+                android:layout_marginBottom="5dp"
+                android:background="@color/lightGray"
+                android:weightSum="2"
+                android:elevation="0dp">
+
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textColor="@color/green"
+                    android:text="Pre Auth Allowed">
+
+                </TextView>
+
+                <TextView
+                    android:id="@+id/preAuthId"
+                    android:gravity="end"
+                    android:layout_width="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                   >
+
+                </TextView>
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="18sp"
+                android:layout_marginBottom="5dp"
+                android:background="@color/lightGray"
+                android:weightSum="2"
+                android:elevation="0dp">
+
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textColor="@color/green"
+                    android:text="Void Allowed">
+
+                </TextView>
+
+                <TextView
+                    android:id="@+id/voidAllowedId"
+                    android:gravity="end"
+                    android:layout_width="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    >
+
+                </TextView>
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="18sp"
+                android:layout_marginBottom="5dp"
+                android:background="@color/lightGray"
+                android:weightSum="2"
+                android:elevation="0dp">
+
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textColor="@color/green"
+                    android:text="Smartpay Allowed">
+
+                </TextView>
+
+                <TextView
+                    android:id="@+id/smartpayId"
+                    android:gravity="end"
+                    android:layout_width="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    >
+
+                </TextView>
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="18sp"
+                android:layout_marginBottom="5dp"
+                android:background="@color/lightGray"
+                android:weightSum="2"
+                android:elevation="0dp">
+
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textColor="@color/green"
+                    android:text="Recharge Sub Type Allowed">
+
+                </TextView>
+
+                <TextView
+                    android:id="@+id/rechargeSubTypeId"
+                    android:gravity="end"
+                    android:layout_width="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    >
+
+                </TextView>
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="18sp"
+                android:layout_marginBottom="5dp"
+                android:background="@color/lightGray"
+                android:weightSum="2"
+                android:elevation="0dp">
+
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textColor="@color/green"
+                    android:text="Reprint Time Limit">
+
+                </TextView>
+
+                <TextView
+                    android:id="@+id/reprintTimeLimitId"
+                    android:gravity="end"
+                    android:layout_width="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    >
+
+                </TextView>
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="18sp"
+                android:layout_marginBottom="5dp"
+                android:background="@color/lightGray"
+                android:weightSum="2"
+                android:elevation="0dp">
+
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textColor="@color/green"
+                    android:text="Void Time Limit">
+
+                </TextView>
+
+                <TextView
+                    android:id="@+id/voidTimeLimitId"
+                    android:gravity="end"
+                    android:layout_width="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    >
+
+                </TextView>
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="18sp"
+                android:layout_marginBottom="5dp"
+                android:background="@color/lightGray"
+                android:weightSum="2"
+                android:elevation="0dp">
+
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textColor="@color/green"
+                    android:text="Sales Allowed">
+
+                </TextView>
+
+                <TextView
+                    android:id="@+id/saleAllowedId"
+                    android:gravity="end"
+                    android:layout_width="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    >
+
+                </TextView>
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="18sp"
+                android:layout_marginBottom="5dp"
+                android:background="@color/lightGray"
+                android:weightSum="2"
+                android:elevation="0dp">
+
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textColor="@color/green"
+                    android:text="Enrollment Allowed">
+
+                </TextView>
+
+                <TextView
+                    android:id="@+id/enrollmentAllowedId"
+                    android:gravity="end"
+                    android:layout_width="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    >
+
+                </TextView>
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="18sp"
+                android:layout_marginBottom="5dp"
+                android:background="@color/lightGray"
+                android:weightSum="2"
+                android:elevation="0dp">
+
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textColor="@color/green"
+                    android:text="Sale Amount Transaction Limit">
+
+                </TextView>
+
+                <TextView
+                    android:id="@+id/saleAmountTrxnLimitId"
+                    android:gravity="end"
+                    android:layout_width="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    >
+
+                </TextView>
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="18sp"
+                android:layout_marginBottom="5dp"
+                android:background="@color/lightGray"
+                android:weightSum="2"
+                android:elevation="0dp">
+
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textStyle="bold"
+                    android:textColor="@color/green"
+                    android:text="Configuration Version">
+
+                </TextView>
+
+                <TextView
+                    android:id="@+id/configurationVersionId"
+                    android:gravity="end"
+                    android:layout_width="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content">
+
+                </TextView>
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </ScrollView>
+
+
+
+
+</LinearLayout>

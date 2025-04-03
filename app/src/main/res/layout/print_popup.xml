@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <View
+        android:id="@+id/firstView"
+        android:layout_marginTop="24dp"
+        android:layout_width="wrap_content"
+        android:background="@color/lightGray"
+        android:layout_height="1dp"/>
+
+    <!-- Title -->
+    <TextView
+        android:layout_marginTop="15dp"
+        android:id="@+id/alert_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textAlignment="center"
+        android:layout_centerHorizontal="true"
+        android:layout_below="@+id/firstView"
+        android:textColor="@android:color/black"
+        android:textSize="20sp"
+        android:layout_marginBottom="15dp" />
+
+    <View
+        android:id="@+id/secondView"
+        android:layout_width="wrap_content"
+        android:background="@color/lightGray"
+        android:layout_height="1dp"
+        android:layout_marginBottom="0dp"
+        android:layout_below="@id/alert_title"/>
+
+    <!-- Buttons -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/secondView"
+        android:orientation="horizontal"
+        android:padding="24dp"
+        android:gravity="center"
+        android:weightSum="2">
+
+        <androidx.appcompat.widget.AppCompatButton
+            style="@android:style/Widget.Button"
+            android:id="@+id/alert_cancel_button"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:layout_weight="1"
+            android:background="@color/btnGray"
+            android:padding="12dp"
+            android:textSize="20sp"
+            android:text="Cancel"
+            android:textColor="#ffffff" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            style="@android:style/Widget.Button"
+            android:id="@+id/alert_ok_button"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@color/topBar"
+            android:text="Yes"
+            android:textSize="20sp"
+            android:textColor="@android:color/white"
+            android:layout_marginStart="8dp"
+            android:padding="12dp" />
+
+    </LinearLayout>
+
+</RelativeLayout>

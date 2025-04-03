@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:background="@color/btnGrayy"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".ufill.UfillPresetActivity">
+
+    <FrameLayout
+        android:visibility="gone"
+        android:id="@+id/dialog_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="20dp"
+        android:background="@drawable/dialog_background"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/dialog_background"
+            android:padding="20dp">
+
+            <ImageView
+                android:id="@+id/image_warning"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_centerHorizontal="true"
+                android:layout_marginBottom="10dp"
+                android:src="@drawable/success" />
+
+            <TextView
+                android:id="@+id/text_message"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_below="@id/image_warning"
+                android:layout_marginBottom="10dp"
+                android:text="Connection unsuccessful"
+                android:textAlignment="center"
+                android:textColor="@android:color/black"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/button_ok"
+                android:layout_width="100dp"
+                android:layout_height="wrap_content"
+                android:layout_below="@id/text_message"
+                android:layout_centerHorizontal="true"
+                android:text="Please wait"
+                android:textAlignment="center"
+                android:textColor="@android:color/black" />
+
+            <Button
+                android:visibility="gone"
+                android:id="@+id/cancel_button"
+                android:layout_width="100dp"
+                android:layout_height="wrap_content"
+                android:layout_below="@id/button_ok"
+                android:layout_centerHorizontal="true"
+                android:layout_marginTop="10dp"
+                android:text="Cancel"
+                android:textAlignment="center"
+                android:textColor="@android:color/white" />
+        </RelativeLayout>
+    </FrameLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

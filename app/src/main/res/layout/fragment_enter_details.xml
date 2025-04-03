@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <include
+            android:id="@+id/toolbar"
+            layout="@layout/toolbar" />
+
+        <EditText
+            android:id="@+id/editotp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="28dp"
+            android:layout_marginTop="15dp"
+            android:layout_marginRight="28dp"
+            android:background="@drawable/edit_text_border"
+            android:ems="10"
+            android:hint="Enter OTP"
+            android:inputType="number"
+            android:maxLength="6"
+            app:layout_constraintEnd_toStartOf="@+id/lastTxnBtn"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <!--        <EditText
+            android:id="@+id/entrotp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="28dp"
+            android:layout_marginTop="15dp"
+            android:layout_marginRight="28dp"
+            android:hint="Enter OTP"
+            android:visibility="gone"
+            android:inputType="numberDecimal"
+            android:textColor="@color/black" />-->
+
+        <!--   <EditText
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="28dp"
+            android:layout_marginTop="15dp"
+            android:layout_marginRight="28dp"
+            android:visibility="gone"
+            android:hint="Odometer Reading" />-->
+
+        <EditText
+            android:id="@+id/odometerReading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="28dp"
+            android:layout_marginTop="15dp"
+            android:layout_marginRight="28dp"
+            android:background="@drawable/edit_text_border"
+            android:ems="10"
+            android:hint="Odometer Reading"
+            android:inputType="text"
+            android:maxLength="12"
+            app:layout_constraintEnd_toStartOf="@+id/lastTxnBtn"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/entrotpBtn"
+            style="@android:style/Widget.Button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="28dp"
+            android:layout_marginTop="15dp"
+            android:layout_marginRight="28dp"
+            android:background="@drawable/voilet_button_bg"
+            android:text="SUBMIT"
+            android:textColor="@color/white"
+            android:textSize="20sp" />
+
+        <TextView
+            android:id="@+id/textmsg"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="28dp"
+            android:layout_marginTop="15dp"
+            android:layout_marginRight="28dp"
+            android:gravity="center"
+            android:text=""
+            android:textColor="@color/green"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/resendotp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="28dp"
+            android:layout_marginTop="15dp"
+            android:layout_marginRight="28dp"
+            android:gravity="center"
+            android:text="@string/resendotp"
+            android:textColor="@color/black"
+            android:visibility="gone" />
+
+
+        <!--     <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/resendotp"
+            style="@android:style/Widget.Button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="28dp"
+            android:layout_marginTop="15dp"
+            android:layout_marginRight="28dp"
+            android:layout_gravity="center"
+            android:visibility="visible"
+            android:background="@drawable/voilet_button_bg"
+            android:text="  RESEND OTP  "
+            android:textColor="@color/white"
+            android:textSize="20sp" />-->
+
+        <TextView
+            android:id="@+id/timerTxt"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="Time remaining: 00:00"
+            android:textSize="18sp"
+            android:textColor="@android:color/black"
+            android:layout_gravity="center" />
+
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/imageView7"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        app:srcCompat="@drawable/fiserv_logo" />
+
+</FrameLayout>

@@ -3,12 +3,11 @@ import binascii
 import json
 import logging
 import time
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs  # kept (even if currently unused)
 from hashlib import sha256
 
 import psycopg2
-from psycopg2.extras import execute_values
-
+from psycopg2.extras import execute_values  # kept (even if currently unused)
 
 from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
 
@@ -27,8 +26,6 @@ CERT_FILE = "MyThing.cert.pem"
 DEDUP_ENABLED = True
 DEDUP_TTL_SECONDS = 120  # keep hashes for 2 minutes
 
-
-
 # =========================
 # PostgreSQL DB Config
 # =========================
@@ -37,7 +34,10 @@ DB_PORT = 5432
 DB_NAME = "nwaresmart"
 DB_USER = "myuser"
 DB_PASS = "Nwaresoft@2025NwareSmart"
+
 TABLE_NAME = "public.device_gateway_data_logs"
+DATA_TABLE_NAME = "public.device_gateway_data"
+DEVICES_TABLE_NAME = "public.devices"
 
 # Table columns (excluding id, deleted_at; we set created_at/updated_at ourselves)
 TABLE_COLUMNS = {
@@ -94,10 +94,6 @@ INT_COLUMNS = {
 # varchar columns that you currently produce as floats
 VARCHAR_NUM_COLUMNS = {"meter_serial_number", "rtc_date_ddmmyy", "rtc_time_hhmmss"}
 
-
-
-
-
 # =========================
 # Logging
 # =========================
@@ -107,7 +103,6 @@ logging.basicConfig(
 )
 log = logging.getLogger("gateway_subscriber")
 
-# Reduce SDK noise
 sdk_logger = logging.getLogger("AWSIoTPythonSDK.core")
 sdk_logger.setLevel(logging.WARNING)
 
@@ -115,20 +110,44 @@ sdk_logger.setLevel(logging.WARNING)
 _seen = {}  # hash -> last_seen_epoch
 
 
+# =========================
+# Small helpers
+# =========================
+def _get_conn():
+    return psycopg2.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASS,
+    )
+
+
+def _num(val, default=0.0):
+    """
+    Always return a number for NOT NULL numeric columns.
+    Prevents psycopg2 NotNullViolation (load/balance/etc).
+    """
+    try:
+        if val is None:
+            return default
+        if isinstance(val, str) and val.strip().lower() in ("", "none", "null"):
+            return default
+        return float(val)
+    except Exception:
+        return default
+
+
 def _dedup_cleanup(now: float):
     if not _seen:
         return
     cutoff = now - DEDUP_TTL_SECONDS
-    # safe cleanup
     for k in list(_seen.keys()):
         if _seen[k] < cutoff:
             _seen.pop(k, None)
 
 
 def is_duplicate_message(iot_json: dict) -> bool:
-    """
-    Creates a stable hash of the key parts. Prefer timestamp + device_id + gateway.
-    """
     if not DEDUP_ENABLED:
         return False
 
@@ -136,7 +155,6 @@ def is_duplicate_message(iot_json: dict) -> bool:
     ts = str(iot_json.get("timestamp", ""))
     gw = str(iot_json.get("gateway", ""))
 
-    # If any are missing, still hash what we have.
     h = sha256(f"{device_id}|{ts}|{gw}".encode("utf-8", errors="ignore")).hexdigest()
 
     now = time.time()
@@ -149,6 +167,9 @@ def is_duplicate_message(iot_json: dict) -> bool:
     return False
 
 
+# =========================
+# Decode helpers
+# =========================
 def rle_decode(data: bytes) -> bytes:
     out = bytearray()
     i = 0
@@ -160,7 +181,6 @@ def rle_decode(data: bytes) -> bytes:
             break
         count = data[i]
         i += 1
-        # defensive: if count is huge, still fine but may be heavy; optional clamp can be added
         out.extend([ch] * count)
     return bytes(out)
 
@@ -173,47 +193,37 @@ def extract_gateway_b64(gateway_str: str) -> str:
         return ""
 
     s = gateway_str.strip()
-
     if s.startswith("**"):
         s = s[2:]
-
     if s.endswith("##"):
         s = s[:-2]
-
     return s.strip()
 
 
 def safe_b64decode(b64_text: str) -> bytes:
-    """
-    Base64 decode that tolerates:
-    - missing padding
-    - newlines/spaces
-    """
-    # remove whitespace/newlines
     s = "".join(b64_text.split())
-
-    # fix padding if needed
     pad = (-len(s)) % 4
     if pad:
         s += "=" * pad
-
     try:
         return base64.b64decode(s, validate=False)
     except (binascii.Error, ValueError):
-        # try without validation anyway
         return base64.b64decode(s)
 
 
-def decode_gateway_to_params(gateway_str: str) -> dict:
+def decode_gateway_to_params(gateway_str: str) -> str:
+    """
+    Returns decoded text (hex string).
+    """
     b64 = extract_gateway_b64(gateway_str)
     if not b64:
-        return {}
+        return ""
 
     try:
         raw = safe_b64decode(b64)
     except Exception:
         log.exception("Base64 decode failed (after stripping **/##)")
-        return {}
+        return ""
 
     try:
         decoded = rle_decode(raw)
@@ -223,21 +233,16 @@ def decode_gateway_to_params(gateway_str: str) -> dict:
         return qs
     except Exception:
         log.exception("RLE/UTF-8 decode failed")
-        return {}
-
-    # try:
-    #     parsed = parse_qs(qs, keep_blank_values=True)
-    #     return {k: (v[0] if isinstance(v, list) and v else "") for k, v in parsed.items()}
-    # except Exception:
-    #     log.exception("Querystring parse failed")
-    #     return {}
+        return ""
 
 
+# =========================
+# HEX parse helpers
+# =========================
 def normalize_hex_code(hex_code: str) -> str:
     if not isinstance(hex_code, str) or not hex_code:
         return ""
 
-    # mimic PHP strstr('-', true) twice
     if "-" in hex_code:
         hex_code = hex_code.split("-", 1)[0]
     if "-" in hex_code:
@@ -269,11 +274,6 @@ def parse_hex_code(hex_code: str) -> dict:
     hex_code = normalize_hex_code(hex_code)
     if not hex_code:
         return {}
-
-    # quick sanity: hex only (optional)
-    # if not all(c in "0123456789abcdefABCDEF" for c in hex_code):
-    #     log.warning("HEX contains non-hex characters")
-    #     return {}
 
     fields = [
         ("header", 3, 1),
@@ -358,10 +358,8 @@ def parse_hex_code(hex_code: str) -> dict:
 
     parsed = {}
     start = 0
-    INT_FIELDS = {
-        "relay_status",
-        "induvisal_relay_status_eb",
-    }
+    INT_FIELDS = {"relay_status", "induvisal_relay_status_eb"}
+
     for name, byte_len, div in fields:
         seg_len = byte_len * 2
         seg = hex_code[start:start + seg_len]
@@ -386,56 +384,33 @@ def parse_hex_code(hex_code: str) -> dict:
 
 
 # =========================
-# DB Insert (safe wrapper)
+# DB helpers
 # =========================
-# def insert_to_db_safe(row: dict) -> bool:
-#     try:
-#         # TODO: implement your DB insert here
-#         # Example: insert_gateway_log_mysql(row)
-#         return True
-#     except Exception:
-#         log.exception("DB insert failed")
-#         return False
-
-
-
-
 def _to_db_value(col: str, val):
-    """Convert python values to proper DB values."""
     if val is None:
         return None
 
-    # normalize "none" strings -> NULL
     if isinstance(val, str):
         if val.strip() == "" or val.strip().lower() == "none":
             return None
         return val
 
-    # int columns: accept float like 65537.0
     if col in INT_COLUMNS:
         try:
             return int(val)
         except Exception:
             return None
 
-    # varchar columns: convert 151225.0 -> "151225"
     if col in VARCHAR_NUM_COLUMNS:
         try:
             return str(int(val))
         except Exception:
             return str(val)
 
-    # numeric columns: keep float/decimal
     return val
 
 
 def _quote_col(col: str) -> str:
-    """
-    Quote reserved/numeric-start columns:
-    - type is reserved keyword
-    - columns starting with digit must be quoted
-    - version is quoted to be safe
-    """
     if col == "type" or col == "version" or col[:1].isdigit():
         return f'"{col}"'
     return col
@@ -443,13 +418,9 @@ def _quote_col(col: str) -> str:
 
 def insert_to_db_safe(final_row: dict) -> bool:
     """
-    Dynamic INSERT:
-    - Inserts only columns available in final_row and present in table schema.
-    - Always sets created_at/updated_at to NOW().
-    - Ensures imei is present (uses device_id if imei missing).
+    Inserts into device_gateway_data_logs
     """
     try:
-        # Ensure imei is set
         imei_val = final_row.get("imei")
         if imei_val in (None, "", "none"):
             imei_val = final_row.get("device_id")
@@ -461,7 +432,6 @@ def insert_to_db_safe(final_row: dict) -> bool:
         final_row = dict(final_row)
         final_row["imei"] = str(imei_val)
 
-        # Build insert columns from final_row intersection with table columns
         insert_cols = []
         insert_vals = []
 
@@ -470,17 +440,14 @@ def insert_to_db_safe(final_row: dict) -> bool:
                 insert_cols.append(col)
                 insert_vals.append(_to_db_value(col, final_row.get(col)))
 
-        # Must include imei even if it was not originally in final_row
         if "imei" not in insert_cols:
             insert_cols.append("imei")
             insert_vals.append(_to_db_value("imei", final_row["imei"]))
 
-        # Also insert signal if available (your table has it)
         if "signal" not in insert_cols and "signal" in final_row:
             insert_cols.append("signal")
             insert_vals.append(_to_db_value("signal", final_row.get("signal")))
 
-        # If error not present, still okay (nullable)
         if "error" not in insert_cols and "error" in final_row:
             insert_cols.append("error")
             insert_vals.append(_to_db_value("error", final_row.get("error")))
@@ -493,13 +460,7 @@ def insert_to_db_safe(final_row: dict) -> bool:
             VALUES ({placeholders}, NOW(), NOW())
         """
 
-        conn = psycopg2.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            dbname=DB_NAME,
-            user=DB_USER,
-            password=DB_PASS,
-        )
+        conn = _get_conn()
         try:
             with conn.cursor() as cur:
                 cur.execute("SET TIME ZONE 'Asia/Kolkata';")
@@ -511,13 +472,125 @@ def insert_to_db_safe(final_row: dict) -> bool:
         return True
 
     except Exception:
-        log.exception("DB insert failed")
+        log.exception("DB insert failed (device_gateway_data_logs)")
         return False
 
 
+def get_device_id_by_imei(imei: str):
+    """
+    devices.id lookup using imei OR serial_number (safer).
+    """
+    if not imei:
+        return None
 
+    sql = f"""
+        SELECT id
+        FROM {DEVICES_TABLE_NAME}
+        WHERE deleted_at IS NULL
+          AND (imei = %s OR serial_number = %s)
+        LIMIT 1
+    """
+
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TIME ZONE 'Asia/Kolkata';")
+            cur.execute(sql, (str(imei), str(imei)))
+            row = cur.fetchone()
+            return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def insert_device_gateway_data_real(final_row: dict) -> bool:
+    """
+    Insert into device_gateway_data using REAL values mapped from logs.
+    Fixes NOT NULL columns by forcing numeric defaults.
+    """
+    try:
+        imei = final_row.get("imei")
+        if imei in (None, "", "none"):
+            imei = final_row.get("device_id")
+
+        if imei in (None, "", "none"):
+            log.warning("device_gateway_data: imei missing")
+            return False
+
+        device_id = get_device_id_by_imei(str(imei))
+        if not device_id:
+            log.warning("device_gateway_data: device not found for imei=%s", imei)
+            return False
+
+        sql = f"""
+            INSERT INTO {DATA_TABLE_NAME} (
+                device_id,
+                start_unit_date,
+                tariff_per_unit,
+                consumed_unit,
+                load,
+                balance,
+                per_unit_charge,
+                voltage_r, voltage_y, voltage_b,
+                current_r, current_y, current_b,
+                pf,
+                signal,
+                error,
+                created_at,
+                updated_at
+            ) VALUES (
+                %s, NOW(),
+                %s, %s, %s, %s, %s,
+                %s, %s, %s,
+                %s, %s, %s,
+                %s,
+                %s,
+                %s,
+                NOW(), NOW()
+            )
+        """
+
+        values = (
+            int(device_id),
+
+            # mapping from logs (your requirement) + NOT NULL safety
+            _num(final_row.get("eb_terriff_setting")),
+            _num(final_row.get("cum_eb_kwh")),
+            _num(final_row.get("total_kw")),          # load (NOT NULL)
+            _num(final_row.get("balance_amount")),    # balance (NOT NULL)
+            _num(final_row.get("eb_terriff_setting")),
+
+            _num(final_row.get("voltage_r")),
+            _num(final_row.get("voltage_y")),
+            _num(final_row.get("voltage_b")),
+            _num(final_row.get("current_r")),
+            _num(final_row.get("current_y")),
+            _num(final_row.get("current_b")),
+            _num(final_row.get("pf")),
+
+            str(final_row.get("signal")) if final_row.get("signal") is not None else None,
+            final_row.get("error"),
+        )
+
+        conn = _get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SET TIME ZONE 'Asia/Kolkata';")
+                cur.execute(sql, values)
+            conn.commit()
+        finally:
+            conn.close()
+
+        return True
+
+    except Exception:
+        log.exception("DB insert failed (device_gateway_data)")
+        return False
+
+
+# =========================
+# Message handling
+# =========================
 def handle_iot_message(iot_json: dict):
-    # Optional dedup to reduce duplicates
     if is_duplicate_message(iot_json):
         log.info("Duplicate message skipped device_id=%s timestamp=%s",
                  iot_json.get("device_id"), iot_json.get("timestamp"))
@@ -530,26 +603,24 @@ def handle_iot_message(iot_json: dict):
 
     params = decode_gateway_to_params(gateway_str)
     print("decode data 11")
-
     print(params)
+
     if not params:
-        # Keep a small snippet for debugging
         snippet = str(gateway_str)[:60]
         log.warning("Gateway decode returned empty params. gateway_snippet=%s", snippet)
         return
 
     hex_data = params
-    if not hex_data:
-        log.warning("Decoded params missing 'data'. params_keys=%s", list(params.keys()))
-        return
 
     parsed_hex = parse_hex_code(hex_data)
     if not parsed_hex:
         log.warning("Hex parse returned empty parsed data")
         return
 
-    # Merge like PHP: unset params['data']
-    #params.pop("data", None)
+    # 🔒 Skip corrupted frames (the '����' case)
+    if not parsed_hex.get("header") or parsed_hex.get("cum_eb_kwh") is None:
+        log.warning("Invalid hex frame skipped device_id=%s", iot_json.get("device_id"))
+        return
 
     final_row = {}
     for k in ("device_id", "battery", "signal", "status", "timestamp"):
@@ -558,28 +629,37 @@ def handle_iot_message(iot_json: dict):
 
     print("decode data 12")
 
-
     final_row.update(parsed_hex)
-
     print(final_row)
 
+    # 1) Insert logs first
     ok = insert_to_db_safe(final_row)
-    if ok:
+    if not ok:
+        return
+
+    log.info(
+        "Logs Inserted OK device_id=%s imei=%s total_kw=%s balance=%s",
+        iot_json.get("device_id"),
+        final_row.get("imei") or final_row.get("device_id"),
+        final_row.get("total_kw"),
+        final_row.get("balance_amount"),
+    )
+
+    # 2) After logs insert, insert into device_gateway_data
+    ok2 = insert_device_gateway_data_real(final_row)
+    if ok2:
         log.info(
-            "Processed OK device_id=%s imei=%s total_kw=%s balance=%s",
-            iot_json.get("device_id"),
-            final_row.get("imei"),
-            final_row.get("total_kw"),
-            final_row.get("balance_amount"),
+            "device_gateway_data Inserted OK imei=%s load=%s balance=%s",
+            final_row.get("imei") or final_row.get("device_id"),
+            _num(final_row.get("total_kw")),
+            _num(final_row.get("balance_amount")),
         )
 
 
 def on_message(client, userdata, message):
-    # IMPORTANT: never let exceptions escape this callback
     try:
         payload_text = message.payload.decode("utf-8", errors="replace")
         iot_json = json.loads(payload_text)
-        #log.debug("Received: %s", iot_json)  # enable if needed
         print(iot_json)
     except Exception:
         log.exception("Invalid JSON received on topic=%s", getattr(message, "topic", ""))
@@ -596,11 +676,10 @@ def build_client() -> AWSIoTMQTTClient:
     mqtt.configureEndpoint(ENDPOINT, 8883)
     mqtt.configureCredentials(ROOT_CA, PRIVATE_KEY, CERT_FILE)
 
-    # Resilience
     mqtt.configureAutoReconnectBackoffTime(1, 32, 20)
     mqtt.configureConnectDisconnectTimeout(10)
     mqtt.configureMQTTOperationTimeout(10)
-    mqtt.configureOfflinePublishQueueing(-1)  # infinite queue
+    mqtt.configureOfflinePublishQueueing(-1)
     mqtt.configureDrainingFrequency(2)
     return mqtt
 
@@ -608,7 +687,6 @@ def build_client() -> AWSIoTMQTTClient:
 def main():
     mqtt = build_client()
 
-    # Keep trying forever (so if endpoint/network issues happen, it won't exit)
     while True:
         try:
             log.info("Connecting to AWS IoT...")
@@ -616,7 +694,6 @@ def main():
             log.info("Connected. Subscribing to %s", TOPIC)
             mqtt.subscribe(TOPIC, 1, on_message)
 
-            # Stay alive; SDK handles reconnect internally
             while True:
                 time.sleep(1)
 

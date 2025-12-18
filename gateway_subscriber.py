@@ -504,8 +504,9 @@ def get_device_id_by_imei(imei: str):
 
 def insert_device_gateway_data_real(final_row: dict) -> bool:
     """
-    Insert into device_gateway_data using REAL values mapped from logs.
-    Fixes NOT NULL columns by forcing numeric defaults.
+    If device_id exists in device_gateway_data → UPDATE
+    If not exists → INSERT
+    No UPSERT, no UNIQUE constraint required
     """
     try:
         imei = final_row.get("imei")
@@ -521,61 +522,122 @@ def insert_device_gateway_data_real(final_row: dict) -> bool:
             log.warning("device_gateway_data: device not found for imei=%s", imei)
             return False
 
-        sql = f"""
-            INSERT INTO {DATA_TABLE_NAME} (
-                device_id,
-                start_unit_date,
-                tariff_per_unit,
-                consumed_unit,
-                load,
-                balance,
-                per_unit_charge,
-                voltage_r, voltage_y, voltage_b,
-                current_r, current_y, current_b,
-                pf,
-                signal,
-                error,
-                created_at,
-                updated_at
-            ) VALUES (
-                %s, NOW(),
-                %s, %s, %s, %s, %s,
-                %s, %s, %s,
-                %s, %s, %s,
-                %s,
-                %s,
-                %s,
-                NOW(), NOW()
-            )
-        """
-
-        values = (
-            int(device_id),
-
-            # mapping from logs (your requirement) + NOT NULL safety
-            _num(final_row.get("eb_terriff_setting")),
-            _num(final_row.get("cum_eb_kwh")),
-            _num(final_row.get("total_kw")),          # load (NOT NULL)
-            _num(final_row.get("balance_amount")),    # balance (NOT NULL)
-            _num(final_row.get("eb_terriff_setting")),
-
-            _num(final_row.get("voltage_r")),
-            _num(final_row.get("voltage_y")),
-            _num(final_row.get("voltage_b")),
-            _num(final_row.get("current_r")),
-            _num(final_row.get("current_y")),
-            _num(final_row.get("current_b")),
-            _num(final_row.get("pf")),
-
-            str(final_row.get("signal")) if final_row.get("signal") is not None else None,
-            final_row.get("error"),
-        )
-
         conn = _get_conn()
         try:
             with conn.cursor() as cur:
                 cur.execute("SET TIME ZONE 'Asia/Kolkata';")
-                cur.execute(sql, values)
+
+                # 1️⃣ CHECK if record exists
+                cur.execute(
+                    f"SELECT 1 FROM {DATA_TABLE_NAME} WHERE device_id = %s LIMIT 1",
+                    (int(device_id),)
+                )
+                exists = cur.fetchone() is not None
+
+                if exists:
+                    # 2️⃣ UPDATE
+                    sql = f"""
+                        UPDATE {DATA_TABLE_NAME}
+                        SET
+                            tariff_per_unit = %s,
+                            consumed_unit   = %s,
+                            load            = %s,
+                            balance         = %s,
+                            per_unit_charge = %s,
+
+                            voltage_r = %s,
+                            voltage_y = %s,
+                            voltage_b = %s,
+
+                            current_r = %s,
+                            current_y = %s,
+                            current_b = %s,
+
+                            pf     = %s,
+                            signal = %s,
+                            error  = %s,
+                            updated_at = NOW()
+                        WHERE device_id = %s
+                    """
+
+                    values = (
+                        _num(final_row.get("eb_terriff_setting")),
+                        _num(final_row.get("cum_eb_kwh")),
+                        _num(final_row.get("total_kw")),
+                        _num(final_row.get("balance_amount")),
+                        _num(final_row.get("eb_terriff_setting")),
+
+                        _num(final_row.get("voltage_r")),
+                        _num(final_row.get("voltage_y")),
+                        _num(final_row.get("voltage_b")),
+                        _num(final_row.get("current_r")),
+                        _num(final_row.get("current_y")),
+                        _num(final_row.get("current_b")),
+
+                        _num(final_row.get("pf")),
+                        str(final_row.get("signal")) if final_row.get("signal") is not None else None,
+                        final_row.get("error"),
+
+                        int(device_id),
+                    )
+
+                    cur.execute(sql, values)
+                    log.info("device_gateway_data UPDATED device_id=%s", device_id)
+
+                else:
+                    # 3️⃣ INSERT (only if not exists)
+                    sql = f"""
+                        INSERT INTO {DATA_TABLE_NAME} (
+                            device_id,
+                            start_unit_date,
+                            tariff_per_unit,
+                            consumed_unit,
+                            load,
+                            balance,
+                            per_unit_charge,
+                            voltage_r, voltage_y, voltage_b,
+                            current_r, current_y, current_b,
+                            pf,
+                            signal,
+                            error,
+                            created_at,
+                            updated_at
+                        ) VALUES (
+                            %s, NOW(),
+                            %s, %s, %s, %s, %s,
+                            %s, %s, %s,
+                            %s, %s, %s,
+                            %s,
+                            %s,
+                            %s,
+                            NOW(), NOW()
+                        )
+                    """
+
+                    values = (
+                        int(device_id),
+
+                        _num(final_row.get("eb_terriff_setting")),
+                        _num(final_row.get("cum_eb_kwh")),
+                        _num(final_row.get("total_kw")),
+                        _num(final_row.get("balance_amount")),
+                        _num(final_row.get("eb_terriff_setting")),
+
+                        _num(final_row.get("voltage_r")),
+                        _num(final_row.get("voltage_y")),
+                        _num(final_row.get("voltage_b")),
+                        _num(final_row.get("current_r")),
+                        _num(final_row.get("current_y")),
+                        _num(final_row.get("current_b")),
+
+                        _num(final_row.get("pf")),
+                        str(final_row.get("signal")) if final_row.get("signal") is not None else None,
+                        final_row.get("error"),
+                    )
+
+                    cur.execute(sql, values)
+                    log.info("device_gateway_data INSERTED device_id=%s", device_id)
+
             conn.commit()
         finally:
             conn.close()
@@ -583,7 +645,7 @@ def insert_device_gateway_data_real(final_row: dict) -> bool:
         return True
 
     except Exception:
-        log.exception("DB insert failed (device_gateway_data)")
+        log.exception("DB insert/update failed (device_gateway_data)")
         return False
 
 

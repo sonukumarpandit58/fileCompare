@@ -436,6 +436,35 @@ textarea{font-family:monospace;min-height:120px}
 
 <div id="apiContainer">
 
+
+<h3 style="color:#f07f2e;">Import API Collection</h3>
+
+<!-- FILE UPLOAD -->
+<label><b>Upload Postman / API Collection (.json)</b></label>
+<input type="file"
+       id="collection_file"
+       accept=".json"
+       class="form-control"
+       onchange="loadCollectionFile(this)">
+
+<p style="margin:10px 0;text-align:center;color:#999">OR</p>
+
+<!-- TEXTAREA (OPTIONAL) -->
+<label><b>Paste Collection JSON</b></label>
+<textarea id="collection_json"
+          class="form-control"
+          placeholder="Paste Postman / API collection JSON here"
+          style="min-height:200px"></textarea>
+
+<button type="button"
+        class="add-btn"
+        style="margin-top:10px"
+        onclick="importCollection()">
+    🚀 Import Collection
+</button>
+
+<hr>
+
 <!-- DEFAULT API (NON-REMOVABLE) -->
 <div class="api-card">
 <label>Method</label>
@@ -649,6 +678,143 @@ function generateRequestTable(textarea) {
         </tr>`;
         tbody.insertAdjacentHTML('beforeend', row);
     });
+}
+
+function importCollection() {
+
+    let raw = document.getElementById('collection_json').value.trim();
+    if (!raw) return alert('Paste collection JSON');
+
+    let data;
+    try {
+        data = JSON.parse(raw);
+    } catch (e) {
+        return alert('Invalid JSON');
+    }
+
+    if (!data.item || !Array.isArray(data.item)) {
+        return alert('Invalid Postman collection');
+    }
+
+    // remove only API cards
+    clearApiCards();
+
+    // recursively extract APIs
+    extractItems(data.item);
+
+    alert('Collection imported successfully');
+}
+
+function extractItems(items) {
+    items.forEach(item => {
+
+        // 📁 Folder (has nested items)
+        if (item.item && Array.isArray(item.item)) {
+            extractItems(item.item);
+            return;
+        }
+
+        // 🚀 Actual API request
+        if (!item.request) return;
+
+        const name = item.name || 'Unnamed API';
+        const method = item.request.method || 'GET';
+
+        let url = '';
+        if (item.request.url) {
+            if (item.request.url.raw) {
+                url = item.request.url.raw;
+            } else {
+                const protocol = item.request.url.protocol || 'https';
+                const host = (item.request.url.host || []).join('.');
+                const path = (item.request.url.path || []).join('/');
+                url = protocol + '://' + host + '/' + path;
+            }
+        }
+
+        let req = item.request.body?.raw || '';
+        let res = item.response?.[0]?.body || '';
+
+        document.getElementById('apiContainer')
+            .insertAdjacentHTML(
+                'beforeend',
+                createApiCard(name, method, url, req, res)
+            );
+    });
+}
+
+function createApiCard(name, method, url, req, res) {
+    return `
+    <div class="api-card">
+        <button type="button" class="remove-btn"
+                onclick="this.parentElement.remove()">×</button>
+
+        <label>Method</label>
+        <select name="api_method[]" class="form-control"
+                onchange="toggleRequest(this)">
+            <option value="GET" ${method==='GET'?'selected':''}>GET</option>
+            <option value="POST" ${method==='POST'?'selected':''}>POST</option>
+        </select>
+
+        <label>API Name</label>
+        <input type="text" name="api_name[]" class="form-control"
+               value="${name}">
+
+        <label>API URL</label>
+        <input type="text" name="api_url[]" class="form-control"
+               value="${url}">
+
+        <label>Request (JSON)</label>
+        <textarea name="api_request[]"
+                  class="form-control request-box"
+                  ${method==='GET'?'disabled':''}
+                  onblur="generateRequestTable(this)">${req}</textarea>
+
+        <h4 class="req-table-title"
+            style="display:none;color:#f07f2e;">
+            JSON Request Field Description
+        </h4>
+
+        <table class="table table-bordered req-table"
+               style="display:none;">
+            <thead style="background:#f07f2e;color:#fff;">
+                <tr>
+                    <th>Parameter</th>
+                    <th>Description</th>
+                    <th>Mandatory</th>
+                    <th>Type</th>
+                    <th>Length</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+
+        <label>Response (JSON)</label>
+        <textarea name="api_response[]" class="form-control">${res}</textarea>
+    </div>`;
+}
+
+
+function loadCollectionFile(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.json')) {
+        alert('Please upload a valid JSON file');
+        input.value = '';
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function (e) {
+        document.getElementById('collection_json').value = e.target.result;
+    };
+    reader.readAsText(file);
+}
+
+function clearApiCards() {
+    document.querySelectorAll('#apiContainer .api-card')
+        .forEach(el => el.remove());
 }
 
 </script>

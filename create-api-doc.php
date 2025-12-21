@@ -735,11 +735,21 @@ function extractItems(items) {
         let req = item.request.body?.raw || '';
         let res = item.response?.[0]?.body || '';
 
-        document.getElementById('apiContainer')
-            .insertAdjacentHTML(
-                'beforeend',
-                createApiCard(name, method, url, req, res)
-            );
+        const container = document.getElementById('apiContainer');
+
+        container.insertAdjacentHTML(
+            'beforeend',
+            createApiCard(name, method, url, req, res)
+        );
+
+        // ✅ AUTO-GENERATE REQUEST TABLE
+        const lastCard = container.querySelector('.api-card:last-child');
+        const textarea = lastCard.querySelector('.request-box');
+
+        if (textarea && textarea.value.trim() !== '') {
+            generateRequestTable(textarea);
+        }
+
     });
 }
 

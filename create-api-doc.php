@@ -261,21 +261,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdf->SetFillColor(240,127,46);
             $pdf->SetTextColor(255,255,255);
 
-            $pdf->Cell(30,8,'Parameter',1,0,'C',true);
-            $pdf->Cell(45,8,'Description',1,0,'C',true);
-            $pdf->Cell(35,8,'Mandatory',1,0,'C',true);
+            $pdf->Cell(40,8,'Parameter',1,0,'C',true);
+            $pdf->Cell(65,8,'Description',1,0,'C',true);
+            $pdf->Cell(30,8,'Mandatory',1,0,'C',true);
             $pdf->Cell(30,8,'Type',1,0,'C',true);
-            $pdf->Cell(0,8,'Length / Value',1,1,'C',true);
+            $pdf->Cell(25,8,'Length / Value',1,1,'C',true);
 
             $pdf->SetTextColor(0,0,0);
             $pdf->SetFont('Arial','',10);
 
             foreach ($reqParams[$idx] as $k => $param) {
-                $pdf->Cell(30,8,$param,1);
-                $pdf->Cell(45,8,$reqDescs[$idx][$k] ?? '',1);
-                $pdf->Cell(35,8,$reqMandatory[$idx][$k] ?? '',1);
+                $pdf->Cell(40,8,$param,1);
+                $pdf->Cell(65,8,$reqDescs[$idx][$k] ?? '',1);
+                $pdf->Cell(30,8,$reqMandatory[$idx][$k] ?? '',1);
                 $pdf->Cell(30,8,$reqTypes[$idx][$k] ?? '',1);
-                $pdf->Cell(0,8,$reqLengths[$idx][$k] ?? '',1,1);
+                $pdf->Cell(25,8,$reqLengths[$idx][$k] ?? '',1,1);
+
             }
         }
 
@@ -434,38 +435,45 @@ textarea{font-family:monospace;min-height:120px}
 
 <hr>
 
+<div style="display:flex;gap:10px;margin-bottom:15px;">
+    <button type="button" id="btnImport" class="btn btn-warning" onclick="switchMode('import')"> Import Collection</button>
+
+    <button type="button" id="btnManual" class="btn btn-primary" onclick="switchMode('manual')"> Manual Entry </button>
+</div>
+
 <div id="apiContainer">
 
 
-<h3 style="color:#f07f2e;">Import API Collection</h3>
+<div id="importSection">
+    <h3 style="color:#f07f2e;">Import API Collection</h3>
 
-<!-- FILE UPLOAD -->
-<label><b>Upload Postman / API Collection (.json)</b></label>
-<input type="file"
-       id="collection_file"
-       accept=".json"
-       class="form-control"
-       onchange="loadCollectionFile(this)">
+    <label><b>Upload Postman / API Collection (.json)</b></label>
+    <input type="file"
+           id="collection_file"
+           accept=".json"
+           class="form-control"
+           onchange="loadCollectionFile(this)">
 
-<p style="margin:10px 0;text-align:center;color:#999">OR</p>
+    <p style="margin:10px 0;text-align:center;color:#999">OR</p>
 
-<!-- TEXTAREA (OPTIONAL) -->
-<label><b>Paste Collection JSON</b></label>
-<textarea id="collection_json"
-          class="form-control"
-          placeholder="Paste Postman / API collection JSON here"
-          style="min-height:200px"></textarea>
+    <label><b>Paste Collection JSON</b></label>
+    <textarea id="collection_json"
+              class="form-control"
+              placeholder="Paste Postman / API collection JSON here"
+              style="min-height:200px"></textarea>
 
-<button type="button"
-        class="add-btn"
-        style="margin-top:10px"
-        onclick="importCollection()">
-    🚀 Import Collection
-</button>
+    <button type="button"
+            class="add-btn"
+            style="margin-top:10px"
+            onclick="importCollection()">Import Collection 
+    </button>
 
-<hr>
+    <hr>
+</div>
+
 
 <!-- DEFAULT API (NON-REMOVABLE) -->
+<div id="manualSection">
 <div class="api-card">
 <label>Method</label>
 <select name="api_method[]" class="form-control" onchange="toggleRequest(this)">
@@ -510,7 +518,7 @@ placeholder="Not required for GET" onblur="generateRequestTable(this)"></textare
 
 <button type="button" class="add-btn" onclick="addApi()">+ Add API</button>
 <br><br>
-
+</div>
 <hr>
 
 <h3 style="color:#f07f2e;">Error Codes</h3>
@@ -550,6 +558,8 @@ placeholder="Not required for GET" onblur="generateRequestTable(this)"></textare
 </div>
 
 <script>
+// default mode (manual)
+switchMode('manual');
 function addApi(){
     document.getElementById('apiContainer').insertAdjacentHTML('beforeend',`
     <div class="api-card">
@@ -826,6 +836,48 @@ function clearApiCards() {
     document.querySelectorAll('#apiContainer .api-card')
         .forEach(el => el.remove());
 }
+
+function addDefaultApiIfEmpty() {
+    const container = document.getElementById('manualSection');
+    const cards = container.querySelectorAll('.api-card');
+
+    if (cards.length === 0) {
+        container.insertAdjacentHTML('afterbegin', createApiCard('', 'GET', '', '', ''));
+    }
+}
+
+function switchMode(mode) {
+    const importSection = document.getElementById('importSection');
+    const manualSection = document.getElementById('manualSection');
+
+    const importBtn = document.getElementById('btnImport');
+    const manualBtn = document.getElementById('btnManual');
+
+    if (mode === 'import') {
+        importSection.style.display = 'block';
+        manualSection.style.display = 'none';
+
+        importBtn.classList.add('btn-warning');
+        importBtn.classList.remove('btn-default');
+
+        manualBtn.classList.add('btn-default');
+        manualBtn.classList.remove('btn-primary');
+    } 
+    else {
+        importSection.style.display = 'none';
+        manualSection.style.display = 'block';
+
+        manualBtn.classList.add('btn-primary');
+        manualBtn.classList.remove('btn-default');
+
+        importBtn.classList.add('btn-default');
+        importBtn.classList.remove('btn-warning');
+
+        // ✅ ENSURE one default API always exists
+        addDefaultApiIfEmpty();
+    }
+}
+
 
 </script>
 

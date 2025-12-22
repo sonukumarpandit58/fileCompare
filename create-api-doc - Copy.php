@@ -192,39 +192,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $page = 3;
 
     foreach ($names as $i => $n) {
-        if (trim($n) === '') continue;
-        $toc[$i] = [
-            'title' => $n,
-            'page'  => $page++,
-            'link'  => $pdf->AddLink()
-        ];
+        if (trim($n)==='') continue;
+        $toc[] = ['title'=>$n,'page'=>$page++,'link'=>$pdf->AddLink()];
     }
-
 
     foreach ($toc as $t) {
         $pdf->contentsLine($t['title'],$t['page'],$t['link']);
     }
 
     /* ---------- API PAGES ---------- */
-    //$idx = 0;
+    $idx = 0;
     foreach ($names as $i => $name) {
 
         if (trim($name)==='') continue;
 
         $method   = strtoupper($methods[$i] ?? 'GET');
         $url      = trim($urls[$i]);
-        // $request  = beautifyJson(trim($reqs[$i] ?? ''));
-
-        $requestRaw = $reqs[$i] ?? '';
-        $request = trim($requestRaw) !== '' ? beautifyJson($requestRaw) : '';
-
+        $request  = beautifyJson(trim($reqs[$i] ?? ''));
         $response = beautifyJson(trim($resps[$i] ?? ''));
 
         $pdf->AddPage();
-        // $pdf->SetLink($toc[$idx]['link']);
-        if (isset($toc[$i])) {
-            $pdf->SetLink($toc[$i]['link']);
-        }
+        $pdf->SetLink($toc[$idx]['link']);
 
         // API Name
         $pdf->SetFont('Arial','B',18);
@@ -262,12 +250,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdf->SetTextColor(0,0,0);
         $pdf->Ln(4);
 
-        if (!empty($reqParams[$i]) && is_array($reqParams[$i])) {
-
+        if (!empty($reqParams[$idx])) {
+            $pdf->Ln(4);
             $pdf->SetFont('Arial','B',12);
             $pdf->Cell(0,8,'Request Field Description :',0,1);
             $pdf->Ln(3);
 
+            // Table header
             $pdf->SetFont('Arial','B',10);
             $pdf->SetFillColor(240,127,46);
             $pdf->SetTextColor(255,255,255);
@@ -281,19 +270,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdf->SetTextColor(0,0,0);
             $pdf->SetFont('Arial','',10);
 
-            foreach ($reqParams[$i] as $k => $param) {
+            foreach ($reqParams[$idx] as $k => $param) {
                 $pdf->Cell(40,8,$param,1);
-                $pdf->Cell(65,8,$reqDescs[$i][$k] ?? '',1);
-                $pdf->Cell(30,8,$reqMandatory[$i][$k] ?? '',1);
-                $pdf->Cell(30,8,$reqTypes[$i][$k] ?? '',1);
-                $pdf->Cell(25,8,$reqLengths[$i][$k] ?? '',1,1);
-            }
+                $pdf->Cell(65,8,$reqDescs[$idx][$k] ?? '',1);
+                $pdf->Cell(30,8,$reqMandatory[$idx][$k] ?? '',1);
+                $pdf->Cell(30,8,$reqTypes[$idx][$k] ?? '',1);
+                $pdf->Cell(25,8,$reqLengths[$idx][$k] ?? '',1,1);
 
-            $pdf->Ln(4);
+            }
         }
 
-        // REQUEST JSON (independent of table)
-        if (trim($request) !== '') {
+        if ($method === 'POST' && $request !== '') {
             $pdf->SetFont('Arial','B',12);
             $pdf->Cell(0,8,'Request',0,1);
             $pdf->SetFont('Courier','',10);
@@ -305,6 +292,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdf->Cell(0,8,'Response',0,1);
         $pdf->SetFont('Courier','',10);
         $pdf->MultiCell(0,6,$response);
+
+        $idx++;
     }
 
         /* ---------- ERROR CODES PAGE ---------- */
@@ -499,7 +488,7 @@ textarea{font-family:monospace;min-height:120px}
 <input type="text" name="api_url[]" class="form-control" required>
 
 <label>Request (JSON)</label>
-<textarea name="api_request[]" class="form-control request-box" 
+<textarea name="api_request[]" class="form-control request-box" disabled
 placeholder="Not required for GET" onblur="generateRequestTable(this)"></textarea>
 
 <h4 class="req-table-title" style="display:none;color:#f07f2e;">
@@ -593,7 +582,7 @@ function addApi(){
         <label>Request (JSON)</label>
         <textarea name="api_request[]"
                   class="form-control request-box"
-                  readonly
+                  disabled
                   placeholder="Not required for GET"
                   onblur="generateRequestTable(this)"></textarea>
 
@@ -625,10 +614,10 @@ function toggleRequest(sel){
     const box = sel.closest('.api-card').querySelector('.request-box');
     if(sel.value === 'GET'){
         box.value='';
-        box.readOnly=true;
+        box.disabled=true;
         box.placeholder='Not required for GET';
     }else{
-        box.readOnly=false;
+        box.disabled=false;
         box.placeholder='';
     }
 }
@@ -653,8 +642,7 @@ function setDownloadType(type) {
 function generateRequestTable(textarea) {
 
     const card = textarea.closest('.api-card');
-    const apiCards = [...document.querySelectorAll('#manualSection .api-card')];
-    const apiIndex = apiCards.indexOf(card);
+    const apiIndex = [...document.querySelectorAll('.api-card')].indexOf(card);
 
     const table = card.querySelector('.req-table');
     const tbody = table.querySelector('tbody');
@@ -703,6 +691,7 @@ function generateRequestTable(textarea) {
 }
 
 function importCollection() {
+
     let raw = document.getElementById('collection_json').value.trim();
     if (!raw) return alert('Paste collection JSON');
 
@@ -717,11 +706,11 @@ function importCollection() {
         return alert('Invalid Postman collection');
     }
 
-    // 🔥 REMOVE DEFAULT API BEFORE IMPORT
-    document.querySelectorAll('#manualSection .api-card').forEach(el => el.remove());
+    // remove only API cards
+    clearApiCards();
 
+    // recursively extract APIs
     extractItems(data.item);
-    switchMode('manual');
 
     alert('Collection imported successfully');
 }
@@ -756,7 +745,7 @@ function extractItems(items) {
         let req = item.request.body?.raw || '';
         let res = item.response?.[0]?.body || '';
 
-        const container = document.getElementById('manualSection');
+        const container = document.getElementById('apiContainer');
 
         container.insertAdjacentHTML(
             'beforeend',
@@ -798,7 +787,7 @@ function createApiCard(name, method, url, req, res) {
         <label>Request (JSON)</label>
         <textarea name="api_request[]"
                   class="form-control request-box"
-                  ${method==='GET'?'readonly':''}
+                  ${method==='GET'?'disabled':''}
                   onblur="generateRequestTable(this)">${req}</textarea>
 
         <h4 class="req-table-title"
@@ -888,6 +877,8 @@ function switchMode(mode) {
         addDefaultApiIfEmpty();
     }
 }
+
+
 </script>
 
 </body>

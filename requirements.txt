@@ -1,0 +1,14 @@
+# RPi4 Fuel Automation — Python dependencies
+# Install: pip3 install -r requirements.txt
+
+# RS485 / UART serial communication
+pyserial>=3.5
+
+# MQTT client (Azure IoT Hub compatible)
+paho-mqtt>=1.6.1
+
+# YAML config parsing
+PyYAML>=6.0
+
+# Optional: AES-256 encryption for TQCL secured mode
+# pycryptodome>=3.19.0

@@ -1,0 +1,160 @@
+# ============================================================
+# RPi4 Fuel Automation - Site & Pump Configuration
+# Site: BPCL RO 222459
+# Protocol: TQCL v2.06 Rev.7 (Non-Secured Mode)
+# ============================================================
+
+site:
+  id: "BPCL_222459"
+  name: "BPCL Retail Outlet 222459"
+  serial_number: "1234567"       # DU serial number
+
+# RS485 serial port settings
+serial:
+  port: "/dev/rs485"             # CH341 USB-RS485 (udev symlink via 99-ch341-rs485.rules)
+  baud_rate: 9600
+  byte_size: 8
+  parity: "N"                    # N=None, E=Even, O=Odd
+  stop_bits: 1
+  timeout: 0.5                   # read timeout in seconds
+  inter_command_gap: 0.1         # seconds between commands (TQCL min ~50ms)
+
+# Dispenser Unit Address (DUA)
+# DUA range: 0x41-0x5F (DU units 1-31, bit format: 010xxxxx)
+# NZA = Nozzle Address (1-based per nozzle)
+dispensers:
+  - du_id: 3
+    dua: 0x41                    # DUA byte (0x41 = DU-A)
+    label: "DU-A"
+    nozzles:
+      - nza: 0x01
+        nozzle_id: 1
+        product: "HSD"
+        product_code: 1
+        unit_price: 0.0
+        preset_value: 100.0
+        enabled: true
+      - nza: 0x02
+        nozzle_id: 2
+        product: "MS"
+        product_code: 2
+        unit_price: 0.0
+        preset_value: 100.0
+        enabled: true
+  - du_id: 4
+    dua: 0x42                    # DUA byte (0x42 = DU-B)
+    label: "DU-B"
+    nozzles:
+      - nza: 0x01
+        nozzle_id: 3
+        product: "HSD"
+        product_code: 1
+        unit_price: 0.0
+        enabled: true
+      - nza: 0x02
+        nozzle_id: 4
+        product: "MS"
+        product_code: 2
+        unit_price: 0.0
+        enabled: true
+
+# Retry and timing policy (from TQCL analysis)
+protocol:
+  status_poll_interval: 0.5      # seconds between status polls
+  status_poll_retries: 6         # retries for main status commands
+  authorize_retries: 5           # retries for authorize command
+  totalizer_retries: 5           # retries for totalizer read
+  command_timeout: 0.25          # seconds to wait for response per attempt
+  preset_timeout: 90             # TQCL preset delivery timeout (seconds)
+  fueling_poll_interval: 1.0     # polling interval during fueling
+  payable_timeout: 300           # max seconds to wait for PAYABLE after fueling
+
+# AWS IoT Core MQTT publisher
+# Auth: X.509 mutual TLS (no username/password - cert+key used instead)
+# Topic: fuel-automation/{site_id}/transactions
+mqtt:
+  enabled: true
+  broker: "ar7fthu9bpn11-ats.iot.ap-south-1.amazonaws.com"
+  port: 8883
+  client_id: "BPCL_222459_RPI4"   # must match Thing name in AWS IoT
+  auth_mode: "cert"                # "cert" = X.509 (AWS IoT), "sas" = SAS token (Azure)
+  ca_cert:   "/etc/fuel-automation/certs/AmazonRootCA1.pem"
+  cert_file: "/etc/fuel-automation/certs/device.crt"
+  key_file:  "/etc/fuel-automation/certs/device.key"
+  topic_template: "fuel-automation/{site_id}/transactions"
+  qos: 1
+  retain: false
+  reconnect_delay: 5
+
+# Transaction data envelope format (matches existing C1 format)
+transaction:
+  # JSON envelope: {"BPCL_181846_<du>_<product>_NOZZLE_<n>": [{"d": "<PSV>"}]}
+  key_template: "{site_id}_{du_id}_{product}_NOZZLE_{nozzle_id}"
+  # PSV field order (21 fields, pipe-separated):
+  # seq|serial|pump_char|nozzle_id|unit_price|payment_mode|discount|
+  # net_amount|gross_amount|density|stot_volume|stot_amount|etot_volume|
+  # etot_amount|start_time|end_time|transaction_id|type|field19|field20|count
+  transaction_count_file: "/var/lib/fuel-automation/txn_count.json"
+  density_default: 0.830         # g/mL default if not available
+
+# ============================================================
+# BLE Module - IOT FCC GATT Server
+# ============================================================
+#
+# BLE Advertising Name format observed on this site:
+#   Bound to site  : "IOT" + SAPCODE + " " + DU3 + DU4
+#                    e.g. "IOT222459 34"
+#                    (single-digit DU numbers, no zero-padding)
+#
+#   Not bound yet  : "ESP_SPP_SERVER"  (factory default, FCC unconfigured)
+#
+# NOTE: The scan always matches by service UUID 0xABF0 first (most reliable),
+# so the adv_prefix / du_no values are used only for diagnostics.
+# ============================================================
+ble:
+  enabled: true
+
+  # Broadcast name = adv_prefix + sap_code + " " + du_nos
+  # e.g. "IOT" + "222459" + " " + "3" + "4"  ->  "IOT222459 34"
+  adv_prefix: "REL"                # prefix for BLE advertising name (no hardcoding)
+
+  # Identity
+  sap_code: "222459"               # SAP/RO code
+                                   # Leave "" to auto-derive from site.id
+
+  fcc_code: "FCC_222459_01"        # Unique FCC unit code for this MPD
+
+  software_revision: "v2.5.0"      # RPi application version
+
+  # Dispenser / Nozzle mapping for this MPD
+  # Maps each FCC DU number to the matching dispenser in [dispensers] RS485 section.
+  #
+  # du_no   : DU number as it appears in BLE broadcast name (e.g. "3", "4")
+  # du_id   : matching du_id from [dispensers] RS485 section above
+  # nozzles : nozzle numbers active on this DU (1-based)
+  dispensers:
+    - du_no: "3"                   # single-digit DU number -> "3" in broadcast name (IOT222459 34)
+      du_id: 3                     # matches du_id:3 in RS485 dispensers section
+      label: "DU-A"
+      nozzles: [1, 2]              # nozzle 1=HSD, nozzle 2=MS
+
+    - du_no: "4"                   # single-digit DU number -> "4" in broadcast name (IOT222459 34)
+      du_id: 4                     # matches du_id:4 in RS485 dispensers section
+      label: "DU-B"
+      nozzles: [3, 4]              # nozzle 3=HSD, nozzle 4=MS
+
+  # Connection tuning
+  mtu: 517                         # BLE ATT MTU bytes; BlueZ max is 512 (ATT payload = 509 bytes)
+  max_connections: 7               # soft cap on simultaneous POS clients (BlueZ hw limit ~7)
+  session_timeout: 30              # seconds of write-inactivity before client session expires
+  scan_timeout: 10.0               # seconds for each BLE device scan
+  response_timeout: 10.0           # seconds to wait for a notify response per command
+  reconnect_delay: 5.0             # seconds between reconnection attempts after drop
+
+# Logging
+logging:
+  level: "DEBUG"                 # DEBUG, INFO, WARNING, ERROR
+  file: "/var/log/fuel-automation/rpi_automation.log"
+  max_bytes: 10485760            # 10 MB
+  backup_count: 5
+  console: true

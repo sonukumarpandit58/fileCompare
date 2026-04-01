@@ -1,0 +1,644 @@
+#!/usr/bin/env python3
+"""
+main.py - RPi4 Fuel Automation Orchestrator
+============================================
+
+FLOW
+----
+1. Continuously poll status of all DUs/nozzles.
+2. Detect nozzle hook-status change (previous vs current).
+3. OFF_HOOK (nozzle lifted):
+     - Read Preset ('H') to check if attendant set an amount/volume.
+     - If preset exists  -> Authorize ('A').
+     - Read start totalizers for transaction record.
+4. ON_HOOK (nozzle replaced):
+     - Read Transaction ('R') for volume/amount.
+     - Read end totalizers.
+     - Clear Sale ('F') to release the dispenser.
+     - Publish TransactionRecord to cloud.
+     - Reset nozzle state for next sale.
+5. Duplicate-operation prevention via per-nozzle action lock.
+6. Retry/timeout handled by NozzleController command methods.
+7. Communication layer (NozzleController / RS485Transport) is completely
+   separate from this state-machine / business-logic layer.
+8. Multiple DUs and nozzles handled concurrently via per-nozzle threads.
+
+THREADING MODEL
+---------------
+    MainThread         - polling loop + edge detection
+    action-{nozzle_id} - per-nozzle OFF_HOOK / ON_HOOK handler (daemon)
+    paho-network       - MQTT background thread (daemon)
+
+SIGNAL HANDLING
+---------------
+    SIGINT  (Ctrl+C)   -> graceful shutdown
+    SIGTERM (systemd)  -> graceful shutdown
+"""
+
+import argparse
+import logging
+import logging.handlers
+import os
+import signal
+import sys
+import threading
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Dict, List, Optional, Set
+
+import yaml
+
+from pump_controller import NozzleConfig, NozzleController, RS485Transport, TransactionRecord
+from cloud_publisher import MQTTPublisher
+from tqcl_protocol import PresetType, PumpState
+
+log = logging.getLogger(__name__)
+
+
+# ── Logging setup ─────────────────────────────────────────────────────────────
+
+def setup_logging(cfg: dict):
+    """Configure rotating file + console logging from config.yaml [logging] section."""
+    level = getattr(logging, cfg.get('level', 'INFO').upper(), logging.INFO)
+    handlers = []
+
+    log_file = cfg.get('file', '/var/log/fuel-automation/rpi_automation.log')
+    try:
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        fh = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=cfg.get('max_bytes', 10_485_760),
+            backupCount=cfg.get('backup_count', 5),
+        )
+        fh.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
+        handlers.append(fh)
+    except PermissionError:
+        pass
+
+    if cfg.get('console', True):
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
+        handlers.append(ch)
+
+    logging.basicConfig(level=level, handlers=handlers)
+
+
+# ── Config loader ─────────────────────────────────────────────────────────────
+
+def load_config(path: str) -> dict:
+    """Load and parse config.yaml using PyYAML safe_load."""
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+
+def build_nozzle_configs(full_cfg: dict) -> List[NozzleConfig]:
+    """Build flat list of NozzleConfig from config.yaml dispenser/nozzle tree."""
+    configs = []
+    for du in full_cfg.get('dispensers', []):
+        du_id = du['du_id']
+        dua   = du['dua']
+        for nozzle in du.get('nozzles', []):
+            if not nozzle.get('enabled', True):
+                continue
+            configs.append(NozzleConfig(
+                nza=nozzle['nza'],
+                dua=dua,
+                nozzle_id=nozzle['nozzle_id'],
+                du_id=du_id,
+                product=nozzle['product'],
+                product_code=nozzle.get('product_code', 1),
+                unit_price=nozzle.get('unit_price', 0.0),
+                preset_value=float(nozzle.get('preset_value', 5000.0)),
+            ))
+    return configs
+
+
+# ── Dry-run transport ─────────────────────────────────────────────────────────
+
+class DryRunTransport(RS485Transport):
+    """Simulated RS485 transport - returns canned responses without hardware."""
+
+    def __init__(self):
+        super().__init__('/dev/null', 9600, 0.5, 0.1)
+
+    def connect(self):
+        log.info("[DRY-RUN] RS485 transport active - no serial port opened")
+
+    def disconnect(self):
+        log.info("[DRY-RUN] RS485 transport disconnected")
+
+    def send_recv(self, frame: bytes, expected_len: int) -> bytes:
+        import tqcl_protocol as tqcl
+        log.info("[DRY-RUN] TX [%d]: %s", len(frame), frame.hex(' ').upper())
+        nza = frame[0]
+        dua = frame[1]
+        cmd = chr(frame[2]) if len(frame) > 2 else '?'
+
+        if cmd == 'S':
+            payload = bytes([nza, dua, 0x01, 0x30, tqcl.EOC])
+        elif cmd == 'H':
+            preset_data = b'0000100.00'
+            payload = bytes([nza, dua, 0x01, 0x30, 0x4D, 0x30]) + preset_data + bytes([tqcl.EOC])
+        elif cmd == 'T':
+            payload = bytes([nza, dua, 0x01, 0x30]) + b'000463547.300 ' + bytes([tqcl.EOC])
+        elif cmd == 'M':
+            payload = bytes([nza, dua, 0x01, 0x30]) + b'00005137.880  ' + bytes([tqcl.EOC])
+        elif cmd == 'R':
+            payload = bytes([nza, dua, 0x08, 0x34]) + b'0093.50' + b'000032.10' + b'000747.90' + bytes([tqcl.EOC])
+        elif cmd in ('A', 'O', 'Z', 'P', 'E', 'F', 'D', 'U', 'B', 'C'):
+            payload = bytes([nza, dua, ord('Y'), tqcl.EOC])
+        else:
+            payload = bytes([nza, dua, ord('Y'), tqcl.EOC])
+
+        bcc = 0
+        for b in payload:
+            bcc ^= b
+        resp = payload + bytes([bcc])
+        log.info("[DRY-RUN] RX [%d]: %s", len(resp), resp.hex(' ').upper())
+        return resp
+
+
+# ── Per-nozzle transaction state ──────────────────────────────────────────────
+
+@dataclass
+class NozzleTransaction:
+    """
+    Holds state for an active (in-progress) fueling transaction on one nozzle.
+
+    Created when the nozzle goes OFF_HOOK (lifted).
+    Used to build the final TransactionRecord when the nozzle goes ON_HOOK (replaced).
+    """
+    nozzle_id:    int
+    txn_id:       str
+    start_time:   str
+    preset_value: float
+    preset_type:  str           # 'amount' or 'volume'
+    stot_volume:  float = 0.0   # start volume totalizer
+    stot_amount:  float = 0.0   # start amount totalizer
+    authorized:   bool  = False
+
+
+# ── Automation engine ─────────────────────────────────────────────────────────
+
+class FuelAutomation:
+    """
+    Top-level orchestrator using an edge-detection state machine.
+
+    Polling loop detects nozzle hook-status transitions and fires
+    per-nozzle action threads for OFF_HOOK and ON_HOOK events.
+    """
+
+    def __init__(self, cfg: dict, dry_run: bool = False):
+        self._cfg     = cfg
+        self._dry_run = dry_run
+        self._running = False
+
+        setup_logging(cfg.get('logging', {}))
+
+        serial_cfg   = cfg['serial']
+        protocol_cfg = cfg['protocol']
+
+        self._transport = (
+            DryRunTransport() if dry_run else
+            RS485Transport(
+                port=serial_cfg['port'],
+                baud=serial_cfg['baud_rate'],
+                timeout=serial_cfg['timeout'],
+                gap=serial_cfg['inter_command_gap'],
+            )
+        )
+
+        self._publisher = MQTTPublisher(cfg.get('mqtt', {}), cfg)
+
+        self._nozzle_cfgs = build_nozzle_configs(cfg)
+
+        self._controllers: Dict[int, NozzleController] = {}
+        for ncfg in self._nozzle_cfgs:
+            ctrl = NozzleController(
+                cfg=ncfg,
+                transport=self._transport,
+                protocol_cfg=protocol_cfg,
+                on_transaction=None,   # we handle the callback ourselves below
+            )
+            self._controllers[ncfg.nozzle_id] = ctrl
+            log.info("Registered nozzle %d: NZA=0x%02X DUA=0x%02X product=%s",
+                     ncfg.nozzle_id, ncfg.nza, ncfg.dua, ncfg.product)
+
+        # ── Per-nozzle state ──────────────────────────────────────────────────
+        # Previous nozzle_on_hook value (None = not yet polled)
+        self._prev_on_hook: Dict[int, Optional[bool]] = {
+            nid: None for nid in self._controllers
+        }
+        # Active transaction per nozzle (None = idle)
+        self._active_txns: Dict[int, Optional[NozzleTransaction]] = {
+            nid: None for nid in self._controllers
+        }
+        # Nozzles currently executing an action thread (OFF_HOOK or ON_HOOK handler)
+        self._action_in_progress: Set[int] = set()
+        self._action_lock = threading.Lock()
+        # Consecutive clear_sale failure count per nozzle (for backoff)
+        self._stuck_fail_count: Dict[int, int] = {
+            nid: 0 for nid in self._controllers
+        }
+
+        signal.signal(signal.SIGINT,  self._shutdown)
+        signal.signal(signal.SIGTERM, self._shutdown)
+
+    # ── Startup ───────────────────────────────────────────────────────────────
+
+    def start(self):
+        log.info("=" * 60)
+        log.info("RPi4 Fuel Automation starting - site=%s", self._cfg['site']['id'])
+        log.info("Protocol: TQCL v2.06 Rev.7  |  Nozzles: %d active",
+                 len(self._controllers))
+        log.info("=" * 60)
+
+        self._transport.connect()
+        self._publisher.connect()
+        time.sleep(2)
+        self._publisher.replay_pending()
+
+        self._running = True
+
+        # Startup scan: clear any nozzles stuck in PAYABLE from previous session
+        for ctrl in self._controllers.values():
+            self._startup_check(ctrl)
+
+        self._main_loop()
+
+    def _startup_check(self, ctrl: NozzleController):
+        """
+        Poll nozzle at startup. If stuck in PAYABLE/STOPPED, send Clear Sale
+        so the pump returns to IDLE and is ready for the next customer.
+        """
+        nza = ctrl.cfg.nza
+        resp = ctrl.poll_status()
+        if not resp:
+            log.error("NZA 0x%02X startup: no status response", nza)
+            return
+
+        log.info("NZA 0x%02X startup: state=%-14s nozzle=%s",
+                 nza, resp.state.name,
+                 "ON_HOOK" if resp.nozzle_on_hook else "OFF_HOOK")
+
+        if resp.state in (PumpState.PAYABLE, PumpState.STOPPED):
+            log.warning("NZA 0x%02X stuck in %s - sending Clear Sale to unblock",
+                        nza, resp.state.name)
+            ctrl.clear_sale()
+
+        # Seed the previous hook state so the first poll delta is correct
+        self._prev_on_hook[ctrl.cfg.nozzle_id] = resp.nozzle_on_hook
+
+    # ── Main polling loop ─────────────────────────────────────────────────────
+
+    def _main_loop(self):
+        """
+        Continuously poll all nozzles and fire edge-triggered action threads.
+
+        Edge detection (previous vs current nozzle_on_hook):
+            True  -> False  :  OFF_HOOK  (nozzle lifted)   -> _handle_off_hook()
+            False -> True   :  ON_HOOK   (nozzle replaced)  -> _handle_on_hook()
+        """
+        interval = self._cfg['protocol']['status_poll_interval']
+
+        while self._running:
+            for nozzle_id, ctrl in self._controllers.items():
+
+                # Skip nozzles already executing an action
+                with self._action_lock:
+                    if nozzle_id in self._action_in_progress:
+                        continue
+
+                resp = ctrl.poll_status()
+                if not resp:
+                    log.warning("NZA 0x%02X poll: no response", ctrl.cfg.nza)
+                    continue
+
+                curr_on_hook = resp.nozzle_on_hook
+                prev_on_hook = self._prev_on_hook.get(nozzle_id)
+
+                # Log every state/hook change
+                if prev_on_hook is not None and curr_on_hook != prev_on_hook:
+                    log.info("NZA 0x%02X  %-14s  hook: %s -> %s",
+                             ctrl.cfg.nza,
+                             resp.state.name,
+                             "ON_HOOK"  if prev_on_hook else "OFF_HOOK",
+                             "ON_HOOK"  if curr_on_hook  else "OFF_HOOK")
+
+                # Update previous state BEFORE spawning thread (prevents double-fire)
+                self._prev_on_hook[nozzle_id] = curr_on_hook
+
+                # ── OFF_HOOK edge: nozzle lifted ──────────────────────────────
+                if prev_on_hook is True and curr_on_hook is False:
+                    with self._action_lock:
+                        self._action_in_progress.add(nozzle_id)
+                    threading.Thread(
+                        target=self._handle_off_hook,
+                        args=(ctrl, nozzle_id),
+                        daemon=True,
+                        name=f"action-{nozzle_id}",
+                    ).start()
+
+                # ── ON_HOOK edge: nozzle replaced ─────────────────────────────
+                elif prev_on_hook is False and curr_on_hook is True:
+                    with self._action_lock:
+                        self._action_in_progress.add(nozzle_id)
+                    threading.Thread(
+                        target=self._handle_on_hook,
+                        args=(ctrl, nozzle_id),
+                        daemon=True,
+                        name=f"action-{nozzle_id}",
+                    ).start()
+
+                # ── PAYABLE with no active transaction (stuck) ────────────────
+                elif (resp.state in (PumpState.PAYABLE, PumpState.STOPPED)
+                      and self._active_txns.get(nozzle_id) is None
+                      and prev_on_hook is not None):
+                    log.warning("NZA 0x%02X stuck in %s (no active txn) - clearing",
+                                ctrl.cfg.nza, resp.state.name)
+                    with self._action_lock:
+                        self._action_in_progress.add(nozzle_id)
+                    threading.Thread(
+                        target=self._clear_stuck,
+                        args=(ctrl, nozzle_id),
+                        daemon=True,
+                        name=f"clear-{nozzle_id}",
+                    ).start()
+
+            time.sleep(interval)
+
+    # ── OFF_HOOK handler ──────────────────────────────────────────────────────
+
+    def _handle_off_hook(self, ctrl: NozzleController, nozzle_id: int):
+        """
+        Nozzle lifted (OFF_HOOK edge).
+
+        Steps:
+          1. Read Preset ('H') - check if attendant set a preset on keypad.
+          2. If preset exists (value > 0): Authorize ('A').
+          3. Read start totalizers.
+          4. Save NozzleTransaction state for the ON_HOOK handler.
+        """
+        nza = ctrl.cfg.nza
+        log.info("NZA 0x%02X ── OFF_HOOK ─────────────────────────────────────", nza)
+
+        try:
+            # ── 1. Check preset ───────────────────────────────────────────────
+            preset_resp = ctrl.read_preset()
+
+            if preset_resp and preset_resp.preset_value > 0.0:
+                preset_value = preset_resp.preset_value
+                preset_type  = 'volume' if preset_resp.preset_type == '1' else 'amount'
+                log.info("NZA 0x%02X preset found: mode=%s type=%s value=%.2f",
+                         nza, preset_resp.mode, preset_type, preset_value)
+            else:
+                # No preset set - log and wait; attendant may set it shortly
+                log.info("NZA 0x%02X no preset set (mode=%s) - skipping authorize",
+                         nza, preset_resp.mode if preset_resp else '?')
+                return
+
+            # ── 2. Authorize ──────────────────────────────────────────────────
+            log.info("NZA 0x%02X authorizing ...", nza)
+            auth_result = ctrl.authorize()
+
+            if auth_result is True:
+                log.info("NZA 0x%02X AUTHORIZATION SUCCESS", nza)
+                authorized = True
+            elif auth_result is False:
+                # Attended mode: attendant presses keypad to authorize physically.
+                # Transaction still proceeds - fueling will start after keypad press.
+                log.warning("NZA 0x%02X authorize NAK (attended mode) "
+                            "- attendant must press keypad", nza)
+                authorized = False
+            else:
+                log.error("NZA 0x%02X authorize: no response - aborting", nza)
+                return
+
+            # ── 3. Read start totalizers ──────────────────────────────────────
+            stot_vol = ctrl.read_volume_totalizer()
+            stot_amt = ctrl.read_amount_totalizer()
+            stot_volume = stot_vol.totalizer if stot_vol else 0.0
+            stot_amount = stot_amt.totalizer if stot_amt else 0.0
+            log.info("NZA 0x%02X STOT_VOL=%.3f  STOT_AMT=%.2f",
+                     nza, stot_volume, stot_amount)
+
+            # ── 4. Save transaction state ─────────────────────────────────────
+            pump_char = chr(ord('A') + ctrl.cfg.du_id - 1)
+            ts     = datetime.now().strftime('%Y%m%d%H%M%S')
+            txn_id = f"{ts}{pump_char}{nozzle_id}"
+
+            self._active_txns[nozzle_id] = NozzleTransaction(
+                nozzle_id=nozzle_id,
+                txn_id=txn_id,
+                start_time=datetime.now().isoformat(timespec='seconds'),
+                preset_value=preset_value,
+                preset_type=preset_type,
+                stot_volume=stot_volume,
+                stot_amount=stot_amount,
+                authorized=authorized,
+            )
+            log.info("NZA 0x%02X transaction started: txn=%s preset=%s %.2f",
+                     nza, txn_id, preset_type, preset_value)
+
+        except Exception as exc:
+            log.error("NZA 0x%02X OFF_HOOK handler error: %s", nza, exc, exc_info=True)
+        finally:
+            with self._action_lock:
+                self._action_in_progress.discard(nozzle_id)
+            log.info("NZA 0x%02X ── OFF_HOOK done ──────────────────────────────", nza)
+
+    # ── ON_HOOK handler ───────────────────────────────────────────────────────
+
+    def _handle_on_hook(self, ctrl: NozzleController, nozzle_id: int):
+        """
+        Nozzle replaced (ON_HOOK edge).
+
+        Steps:
+          1. Read Transaction ('R') for volume/amount/price.
+          2. Read end totalizers.
+          3. Clear Sale ('F') to release dispenser back to IDLE.
+          4. Publish TransactionRecord.
+          5. Reset nozzle state for next sale.
+        """
+        nza = ctrl.cfg.nza
+        log.info("NZA 0x%02X ── ON_HOOK ──────────────────────────────────────", nza)
+
+        try:
+            txn = self._active_txns.get(nozzle_id)
+            end_time = datetime.now().isoformat(timespec='seconds')
+
+            if txn is None:
+                # Nozzle was replaced without a tracked transaction
+                # (e.g. lifted before system started). Still send Clear Sale as safety.
+                log.info("NZA 0x%02X no active transaction - sending Clear Sale", nza)
+                ctrl.clear_sale()
+                return
+
+            log.info("NZA 0x%02X closing txn=%s", nza, txn.txn_id)
+
+            # ── 1. Read transaction details ───────────────────────────────────
+            txn_resp = ctrl.read_transaction()
+            if txn_resp:
+                volume     = txn_resp.volume
+                amount     = txn_resp.amount
+                unit_price = txn_resp.unit_price or ctrl.cfg.unit_price
+                log.info("NZA 0x%02X Read Txn: vol=%.3fL  amt=%.2f  price=%.2f",
+                         nza, volume, amount, unit_price)
+            else:
+                log.error("NZA 0x%02X read_transaction failed - using zeros", nza)
+                volume     = 0.0
+                amount     = 0.0
+                unit_price = ctrl.cfg.unit_price
+
+            # ── 2. Read end totalizers ────────────────────────────────────────
+            etot_vol = ctrl.read_volume_totalizer()
+            etot_amt = ctrl.read_amount_totalizer()
+            etot_volume = etot_vol.totalizer if etot_vol else 0.0
+            etot_amount = etot_amt.totalizer if etot_amt else 0.0
+            log.info("NZA 0x%02X ETOT_VOL=%.3f  ETOT_AMT=%.2f",
+                     nza, etot_volume, etot_amount)
+
+            # Totalizer cross-check
+            vol_diff = round(etot_volume - txn.stot_volume, 3)
+            amt_diff = round(etot_amount - txn.stot_amount, 2)
+            if volume > 0 and abs(vol_diff - volume) > 0.1:
+                log.warning("NZA 0x%02X totalizer mismatch: "
+                            "txn_vol=%.3f  tot_diff=%.3f",
+                            nza, volume, vol_diff)
+
+            # ── 3. Clear Sale ─────────────────────────────────────────────────
+            ctrl.clear_sale(txn_id=txn.txn_id)
+            log.info("NZA 0x%02X Clear Sale sent - dispenser released to IDLE", nza)
+
+            # ── 4. Publish record ─────────────────────────────────────────────
+            du_id = ctrl.cfg.du_id
+            record = TransactionRecord(
+                nozzle_id=nozzle_id,
+                product=ctrl.cfg.product,
+                unit_price=unit_price,
+                preset_type=txn.preset_type,
+                preset_value=txn.preset_value,
+                stot_volume=txn.stot_volume,
+                stot_amount=txn.stot_amount,
+                etot_volume=etot_volume,
+                etot_amount=etot_amount,
+                volume=volume,
+                amount=amount,
+                start_time=txn.start_time,
+                end_time=end_time,
+                transaction_id=txn.txn_id,
+                density=self._cfg.get('transaction', {}).get('density_default', 0.830),
+            )
+
+            log.info("NZA 0x%02X TRANSACTION COMPLETE: vol=%.3fL  amt=%.2f  txn=%s",
+                     nza, volume, amount, txn.txn_id)
+            self._publisher.publish_transaction(record, du_id=du_id)
+
+            # ── 5. Reset state ────────────────────────────────────────────────
+            self._active_txns[nozzle_id] = None
+            self._stuck_fail_count[nozzle_id] = 0   # clear any stuck backoff
+            log.info("NZA 0x%02X nozzle ready for next sale", nza)
+
+        except Exception as exc:
+            log.error("NZA 0x%02X ON_HOOK handler error: %s", nza, exc, exc_info=True)
+        finally:
+            with self._action_lock:
+                self._action_in_progress.discard(nozzle_id)
+            log.info("NZA 0x%02X ── ON_HOOK done ───────────────────────────────", nza)
+
+    # ── Stuck PAYABLE cleaner ─────────────────────────────────────────────────
+
+    def _clear_stuck(self, ctrl: NozzleController, nozzle_id: int):
+        """
+        Attempt to unstick a nozzle in STOPPED/PAYABLE with no active transaction.
+
+        Strategy:
+          1. Try Read Transaction ('R') first — some firmware requires the master
+             to read transaction data before accepting Clear Sale ('F').
+          2. Send Clear Sale ('F').
+          3. On repeated failures apply exponential backoff (max 60 s) to avoid
+             flooding the RS485 bus.  After 10 consecutive failures, only retry
+             once per minute and log a prominent error so the operator knows
+             a manual dispenser reset may be required.
+        """
+        nza = ctrl.cfg.nza
+        fail_count = self._stuck_fail_count.get(nozzle_id, 0)
+
+        # Exponential backoff: 0, 2, 4, 8, 16, 32, 60, 60, ... seconds
+        if fail_count > 0:
+            backoff = min(2 ** (fail_count - 1), 60)
+            log.info("NZA 0x%02X clear_stuck: attempt %d, waiting %ds backoff",
+                     nza, fail_count + 1, backoff)
+            time.sleep(backoff)
+
+        try:
+            # Step 1: Read Transaction first (required by some dispenser firmware
+            # before Clear Sale will be accepted in STOPPED/PAYABLE state)
+            txn = ctrl.read_transaction()
+            if txn:
+                log.info("NZA 0x%02X clear_stuck: read_transaction ok "
+                         "vol=%.3fL amt=%.2f unit_price=%.2f",
+                         nza, txn.volume, txn.amount, txn.unit_price)
+
+            # Step 2: Send Clear Sale
+            ok = ctrl.clear_sale()
+            if ok:
+                log.info("NZA 0x%02X stuck PAYABLE cleared successfully", nza)
+                self._stuck_fail_count[nozzle_id] = 0   # reset counter on success
+            else:
+                self._stuck_fail_count[nozzle_id] = fail_count + 1
+                if fail_count == 0:
+                    log.error("NZA 0x%02X clear_stuck: clear_sale FAILED "
+                              "(dispenser NAK'd 'F' command) - will retry with backoff",
+                              nza)
+                elif fail_count >= 9:
+                    log.error("NZA 0x%02X clear_stuck: %d consecutive failures - "
+                              "dispenser may need MANUAL RESET at the pump keypad",
+                              nza, fail_count + 1)
+                else:
+                    log.warning("NZA 0x%02X clear_stuck: attempt %d failed, retrying",
+                                nza, fail_count + 1)
+
+        except Exception as exc:
+            log.error("NZA 0x%02X clear_stuck error: %s", nza, exc)
+            self._stuck_fail_count[nozzle_id] = fail_count + 1
+        finally:
+            with self._action_lock:
+                self._action_in_progress.discard(nozzle_id)
+
+    # ── Transaction publish callback ──────────────────────────────────────────
+
+    def _handle_transaction(self, record: TransactionRecord):
+        """Legacy callback - not used in new flow (publishing done in _handle_on_hook)."""
+        pass
+
+    # ── Graceful shutdown ─────────────────────────────────────────────────────
+
+    def _shutdown(self, signum, frame):
+        log.info("Shutdown signal %d received - stopping ...", signum)
+        self._running = False
+        self._transport.disconnect()
+        self._publisher.disconnect()
+        sys.exit(0)
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='RPi4 Fuel Automation - TQCL RS485 driver'
+    )
+    parser.add_argument('--config',   default='config.yaml',
+                        help='Path to config.yaml')
+    parser.add_argument('--dry-run',  action='store_true',
+                        help='Simulate RS485 without hardware')
+    args = parser.parse_args()
+
+    cfg    = load_config(args.config)
+    engine = FuelAutomation(cfg, dry_run=args.dry_run)
+    engine.start()
+
+
+if __name__ == '__main__':
+    main()

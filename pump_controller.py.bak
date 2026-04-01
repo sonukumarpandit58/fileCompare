@@ -1,0 +1,1247 @@
+"""
+pump_controller.py - Per-nozzle TQCL state machine and RS485 transport layer
+==============================================================================
+
+PURPOSE
+-------
+This module contains two major responsibilities:
+
+  1. RS485Transport  - Thread-safe hardware abstraction for the serial port.
+                       All nozzles on the same RS485 bus share ONE transport
+                       instance. A threading.Lock ensures only one nozzle
+                       sends/receives at a time (RS485 is half-duplex).
+
+  2. NozzleController - Per-nozzle state machine and command executor.
+                        Each active nozzle gets its own NozzleController.
+                        It implements the full 14-step TQCL transaction cycle
+                        and a background polling thread to track state changes.
+
+TRANSACTION FLOW (14 steps, per TQCL Section 7 flow chart)
+-----------------------------------------------------------
+    1.  Pump Start ('O')        -> Put dispenser into Remote Control Mode
+    2.  Poll Status ('S')       -> Block until state = CALL (nozzle lifted)
+    3.  Set Preset ('P')        -> Program the fill limit (amount or volume)
+    4.  Poll Status ('S')       -> Wait for state = PRESET_READY
+    5.  Authorize ('A')         -> Grant permission to dispense fuel
+    6.  Poll Status ('S')       -> Wait for AUTHORIZED / FUELING state
+    7.  Read Volume Total ('T') -> Capture start totalizer (stot_volume)
+    8.  Read Amount Total ('M') -> Capture start totalizer (stot_amount)
+    9.  Poll Status ('S')       -> Block until state = PAYABLE or STOPPED
+    10. Read Transaction ('R')  -> Get volume, amount, unit_price
+    11. Read Volume Total ('T') -> Capture end totalizer (etot_volume)
+    12. Read Amount Total ('M') -> Capture end totalizer (etot_amount)
+    13. Clear Sale ('F')        -> Acknowledge transaction, return to IDLE
+    14. Callback                -> Fire on_transaction(record) to publish to cloud
+
+THREADING MODEL
+---------------
+    Main thread:
+        - Runs the main polling loop in FuelAutomation._main_loop()
+        - Reads NozzleController.current_state (thread-safe property)
+        - Spawns one transaction thread per nozzle when CALL is detected
+
+    Background polling thread (one per nozzle, started by start_polling()):
+        - Continuously sends Status Poll every `status_poll_interval` seconds
+        - Updates self._state for the main thread to read
+        - Runs as a daemon thread (auto-killed when main process exits)
+
+    Transaction thread (one per active transaction, spawned by main loop):
+        - Runs run_transaction_cycle() to completion
+        - Acquires RS485 bus lock for each command via RS485Transport.send_recv()
+        - Reports completion via on_transaction callback
+
+    RS485 Bus Lock:
+        - threading.Lock() inside RS485Transport serialises all bus access
+        - All nozzles and polling threads share the same lock
+        - Prevents frame collisions on the half-duplex RS485 bus
+
+RETRY POLICY (from TQCL spec and wayne.bin reverse engineering)
+---------------------------------------------------------------
+    Status Poll   : 6 retries, 250ms delay  (total max 1.5 sec)
+    Authorize     : 5 retries, 100ms delay  (total max 500ms)
+    Totalizers    : 5 retries, 250ms delay  (total max 1.25 sec)
+    Preset timeout: 90 seconds (wait for nozzle lift)
+    Payable wait  : 300 seconds (max fueling time)
+
+DEPENDENCIES
+------------
+    serial          : pyserial>=3.5  (RS485/UART hardware interface)
+    tqcl_protocol   : Local module (frame builder, command encoders, parsers)
+"""
+
+import time
+import logging
+import threading
+from datetime import datetime
+from typing import Optional, Dict, Any, Callable
+from dataclasses import dataclass, field
+
+import serial
+
+import tqcl_protocol as tqcl
+from tqcl_protocol import PumpState, PresetType
+
+log = logging.getLogger(__name__)
+
+
+# ── Data classes ──────────────────────────────────────────────────────────────
+
+@dataclass
+class NozzleConfig:
+    """
+    Immutable configuration for a single nozzle, loaded from config.yaml.
+
+    One NozzleConfig is created per enabled nozzle at startup and passed
+    to the NozzleController constructor. It never changes at runtime.
+
+    Attributes:
+        nza          (int)   : Nozzle Address byte (1-based, 1 byte).
+                               Identifies the nozzle within its dispenser unit.
+                               Example: 0x01 = Nozzle 1, 0x02 = Nozzle 2.
+
+        dua          (int)   : Dispenser Unit Address byte.
+                               Formula: DUA = 0x40 | unit_number.
+                               Example: unit 2 -> DUA = 0x42, unit 3 -> DUA = 0x43.
+                               Both NZA and DUA appear in every TQCL frame header.
+
+        nozzle_id    (int)   : System-wide unique nozzle identifier (1-based).
+                               Used in PSV output and logging.
+                               Example: Nozzle 3 across all dispensers.
+
+        du_id        (int)   : Dispenser unit index (1-based).
+                               Maps to pump_char in PSV: du_id=1 -> 'A', 2 -> 'B'.
+
+        product      (str)   : Fuel product name dispensed by this nozzle.
+                               Examples: 'HSD' (High Speed Diesel),
+                               'EBMS' (Extra Premium MS), 'MS' (Motor Spirit).
+
+        product_code (int)   : Numeric product code (for cloud payload).
+
+        enabled      (bool)  : If False, this nozzle is skipped at startup.
+                               Useful for physically absent or out-of-service nozzles.
+
+        unit_price   (float) : Price per litre in local currency (INR).
+                               Used as fallback if the dispenser returns 0.00
+                               in the Read Transaction response.
+    """
+    nza: int
+    dua: int
+    nozzle_id: int
+    du_id: int
+    product: str
+    product_code: int
+    enabled: bool = True
+    unit_price: float = 0.0
+    preset_value: float = 5000.0   # default fill-amount preset in INR (overridden from config.yaml)
+
+
+@dataclass
+class TransactionRecord:
+    """
+    All data collected for one completed fuel dispensing transaction.
+
+    Built incrementally during run_transaction_cycle() and completed
+    at step 13 (Clear Sale). Passed to the on_transaction callback which
+    hands it to MQTTPublisher for cloud upload.
+
+    Attributes:
+        nozzle_id    (int)   : System-wide nozzle identifier.
+        product      (str)   : Fuel product name (e.g. 'HSD').
+        unit_price   (float) : Price per litre at time of transaction (INR/L).
+        preset_type  (str)   : 'amount' or 'volume' (how the transaction was capped).
+        preset_value (float) : The preset limit that was programmed.
+
+        stot_volume  (float) : Volume totalizer reading BEFORE fueling (litres).
+                               Cumulative total on the dispenser's odometer.
+        stot_amount  (float) : Amount totalizer reading BEFORE fueling (INR).
+        etot_volume  (float) : Volume totalizer reading AFTER fueling (litres).
+        etot_amount  (float) : Amount totalizer reading AFTER fueling (INR).
+
+        volume       (float) : Fuel dispensed in this transaction (litres).
+                               Source: Read Transaction ('R') response.
+                               Cross-check: should equal etot_volume - stot_volume.
+        amount       (float) : Money charged in this transaction (INR).
+                               Source: Read Transaction ('R') response.
+
+        start_time   (str)   : ISO-8601 timestamp when nozzle was lifted (CALL state).
+                               Format: '2026-03-28T10:00:00'
+        end_time     (str)   : ISO-8601 timestamp when pump reached PAYABLE state.
+        transaction_id (str) : Unique ID for this transaction.
+                               Format: '{YYYYMMDDHHmmss}{pump_char}{nozzle_id}'
+                               Example: '20260328100000A1'
+        density      (float) : Fuel density in g/mL (from config.yaml).
+                               Default: 0.830 for HSD.
+                               Used in PSV field but not calculated here.
+    """
+    nozzle_id: int
+    product: str
+    unit_price: float
+    preset_type: str           # 'amount' or 'volume'
+    preset_value: float
+    stot_volume: float = 0.0
+    stot_amount: float = 0.0
+    etot_volume: float = 0.0
+    etot_amount: float = 0.0
+    volume: float = 0.0
+    amount: float = 0.0
+    start_time: str = ""
+    end_time: str = ""
+    transaction_id: str = ""
+    density: float = 0.830     # g/mL default for HSD
+
+
+# ── RS485 hardware transport ──────────────────────────────────────────────────
+
+class RS485Transport:
+    """
+    Thread-safe serial port abstraction for RS485 half-duplex communication.
+
+    WHAT IT DOES
+    ------------
+    Opens and manages the USB-RS485 serial port and provides a single
+    send_recv() method that atomically writes a command frame and reads
+    back the response. A threading.Lock prevents multiple nozzle threads
+    from sending simultaneously, which would corrupt frames on the shared bus.
+
+    WHY RS485 NEEDS A LOCK
+    ----------------------
+    RS485 is a multi-drop half-duplex bus. Only one device may transmit at
+    a time. If two NozzleController threads call send_recv() simultaneously:
+      - Both frames would be sent overlapping each other on the wire
+      - The dispenser would see garbled data and respond with garbage
+      - Both reads would receive mixed-up response fragments
+
+    The lock ensures one command completes its full round-trip before the
+    next one starts.
+
+    CONNECT RETRY LOOP
+    ------------------
+    At startup, the USB-RS485 adapter may not yet be plugged in
+    (/dev/ttyUSB0 not present). Instead of crashing, connect() retries
+    every 10 seconds until the port appears. This allows the systemd
+    service to start on boot even before the operator plugs in the hardware.
+
+    SUBCLASSING
+    -----------
+    DryRunTransport in main.py inherits from this class and overrides
+    connect() and send_recv() to simulate the hardware without a real
+    serial port. This enables full testing on a development machine.
+
+    Args (constructor):
+        port    (str)  : Serial device path. Example: '/dev/ttyUSB0'.
+        baud    (int)  : Baud rate. Tokheim TQCL default is 9600.
+        timeout (float): Read timeout in seconds. How long to wait for a response
+                         before returning partial/empty bytes.
+        gap     (float): Inter-command gap in seconds. Minimum pause between
+                         consecutive commands to let the dispenser recover.
+                         Typically 0.1 seconds.
+    """
+
+    def __init__(self, port: str, baud: int, timeout: float, gap: float):
+        self._port = port          # e.g. '/dev/ttyUSB0'
+        self._baud = baud          # e.g. 9600
+        self._timeout = timeout    # e.g. 0.5 seconds read timeout
+        self._gap = gap            # e.g. 0.1 seconds between commands
+        self._serial: Optional[serial.Serial] = None
+        # Mutex: only one thread can use the bus at a time
+        self._lock = threading.Lock()
+
+    def connect(self):
+        """
+        Open the RS485 serial port, retrying indefinitely if unavailable.
+
+        Configures the port with TQCL-standard settings:
+            - 8 data bits (EIGHTBITS)
+            - No parity (PARITY_NONE)
+            - 1 stop bit (STOPBITS_ONE)
+            - Read timeout as configured
+
+        On success: logs "RS485 connected on /dev/ttyUSB0 @ 9600 baud"
+        On failure: logs a WARNING and retries after 10 seconds.
+
+        This blocking retry loop means:
+            - The service starts cleanly on boot even without hardware
+            - Plugging in the USB-RS485 adapter at any time will be detected
+            - No supervisor/watchdog needed for initial hardware connection
+
+        Raises:
+            Never raises - loops until success or process is killed.
+        """
+        retry_delay = 10   # seconds to wait between attempts
+        attempt = 0
+        while True:
+            try:
+                self._serial = serial.Serial(
+                    port=self._port,
+                    baudrate=self._baud,
+                    bytesize=serial.EIGHTBITS,     # 8 data bits
+                    parity=serial.PARITY_NONE,     # no parity bit
+                    stopbits=serial.STOPBITS_ONE,  # 1 stop bit
+                    timeout=self._timeout,         # read timeout
+                )
+                log.info("RS485 connected on %s @ %d baud", self._port, self._baud)
+                return   # success - exit loop
+            except serial.SerialException as exc:
+                attempt += 1
+                log.warning(
+                    "RS485 port %s not available (attempt %d): %s - retrying in %ds",
+                    self._port, attempt, exc, retry_delay,
+                )
+                time.sleep(retry_delay)
+
+    def disconnect(self):
+        """
+        Close the serial port gracefully.
+
+        Called during shutdown (SIGTERM/SIGINT handler in FuelAutomation).
+        Safe to call even if the port was never opened or already closed.
+        """
+        if self._serial and self._serial.is_open:
+            self._serial.close()
+            log.info("RS485 disconnected")
+
+    def send_recv(self, frame: bytes, expected_len: int) -> bytes:
+        """
+        Atomically send a TQCL command frame and receive the response.
+
+        This is the ONLY method that touches the physical serial port.
+        All command sending in NozzleController flows through here.
+
+        Steps performed under the lock:
+          1. Acquire the bus lock (blocks if another nozzle is communicating)
+          2. Flush any stale bytes from the input buffer
+          3. Write the command frame bytes to the serial port
+          4. Log the TX frame at DEBUG level (hex dump)
+          5. Read exactly `expected_len` bytes from the serial port
+          6. Log the RX frame at DEBUG level
+          7. Sleep for inter_command_gap seconds
+          8. Release the lock
+
+        Args:
+            frame        (bytes): Complete TQCL command frame including BCC.
+                                  Built by one of the cmd_*() functions in tqcl_protocol.py.
+            expected_len (int)  : Number of bytes to read from the port.
+                                  Must match the documented response size for the command.
+                                  (See NozzleController.RESP_SIZE table.)
+
+        Returns:
+            bytes: Raw response bytes. May be shorter than expected_len if
+                   the dispenser does not respond within the timeout period.
+                   Callers MUST validate with verify_response() (done by parse_*()).
+
+        Raises:
+            IOError: If the serial port is not open when called.
+                     This should not happen in normal operation since connect()
+                     blocks until the port is available.
+
+        Thread safety:
+            Fully thread-safe. The threading.Lock() serialises all bus access.
+            Callers on other threads will block at the lock acquisition until
+            the current send_recv() completes.
+
+        Debug logging:
+            At DEBUG level, every TX and RX frame is printed as hex.
+            Enable with: logging.level: DEBUG in config.yaml.
+            Example:
+                TX [5]: 01 42 53 7F 6F
+                RX [6]: 01 42 01 30 7F 0D
+        """
+        with self._lock:
+            # Verify port is open before attempting I/O
+            if not self._serial or not self._serial.is_open:
+                raise IOError("Serial port not open")
+
+            # Flush stale bytes from previous transactions or line noise
+            self._serial.reset_input_buffer()
+
+            # Send the command frame
+            self._serial.write(frame)
+            log.debug("TX [%d]: %s", len(frame), frame.hex(' ').upper())
+
+            # Read the expected response (blocks up to self._timeout seconds)
+            raw = self._serial.read(expected_len)
+            log.debug("RX [%d]: %s", len(raw), raw.hex(' ').upper())
+
+            # Enforce minimum inter-command gap (dispenser needs recovery time)
+            time.sleep(self._gap)
+
+            return raw
+
+
+# ── Per-nozzle state machine ──────────────────────────────────────────────────
+
+class NozzleController:
+    """
+    State machine and command executor for a single fuel dispenser nozzle.
+
+    One NozzleController instance is created per active nozzle at startup.
+    All nozzles share the same RS485Transport instance.
+
+    RESPONSIBILITIES
+    ----------------
+    1. Low-level command execution via _send() and _retry()
+    2. Named command methods (poll_status, authorize, set_preset, etc.)
+    3. State wait helpers (_wait_for_state)
+    4. Full transaction cycle orchestration (run_transaction_cycle)
+    5. Background polling thread management (start_polling / _poll_loop)
+    6. Thread-safe current state property (current_state)
+
+    COMMAND RETRY LOGIC
+    -------------------
+    The RS485 bus is electrically noisy in industrial environments.
+    Every command is retried `retries` times with `delay` seconds between
+    attempts. If all retries fail, the method returns None (or False for ACK
+    commands) and the caller decides how to handle the failure.
+
+    No exceptions are raised from retry failures - they are all logged and
+    propagated as None/False return values.
+
+    Args:
+        cfg            (NozzleConfig)  : Nozzle configuration from config.yaml.
+        transport      (RS485Transport): Shared RS485 bus transport instance.
+        protocol_cfg   (dict)          : Protocol timing parameters from config.yaml.
+                                         Keys used:
+                                           status_poll_retries  (int)
+                                           authorize_retries    (int)
+                                           totalizer_retries    (int)
+                                           command_timeout      (float)
+                                           preset_timeout       (float)
+                                           payable_timeout      (float)
+                                           status_poll_interval (float)
+                                           fueling_poll_interval (float)
+        on_transaction (callable, opt) : Callback invoked when a transaction
+                                         completes successfully.
+                                         Signature: on_transaction(record: TransactionRecord)
+                                         Called from the transaction thread.
+    """
+
+    # Expected response length in bytes for each command character.
+    # Used by _send() to tell the serial port how many bytes to read.
+    # Values come from TQCL v2.06 Rev.7 response format definitions.
+    RESP_SIZE = {
+        'S': 6,   # Status Poll           -> [NZA][DUA][S0][S1][EOC][BCC]
+        'C': 5,   # Check Preset          -> [NZA][DUA][ACK][EOC][BCC]
+        'R': 31,  # Read Transaction      -> [NZA][DUA][S0][S1][Price×7][Vol×9][Amt×9][EOC][BCC]
+        'T': 20,  # Read Volume Totalizer -> [NZA][DUA][S0][S1][VolTot×14][EOC][BCC]
+        'M': 20,  # Read Amount Totalizer -> [NZA][DUA][S0][S1][AmtTot×14][EOC][BCC]
+        'H': 18,  # Read Preset           -> [NZA][DUA][S0][S1][Mode][Type][PresetData×10][EOC][BCC]
+        'A': 5,   # Authorize             -> [NZA][DUA][ACK][EOC][BCC]
+        'F': 5,   # Clear Sale            -> [NZA][DUA][ACK][EOC][BCC]
+        'P': 5,   # Set Preset            -> [NZA][DUA][ACK][EOC][BCC]
+        'E': 5,   # Cancel Preset         -> [NZA][DUA][ACK][EOC][BCC]
+        'O': 5,   # Pump Start            -> [NZA][DUA][ACK][EOC][BCC]
+        'Z': 5,   # Pump Stop             -> [NZA][DUA][ACK][EOC][BCC]
+        'D': 5,   # Suspend Sale          -> [NZA][DUA][ACK][EOC][BCC]
+        'U': 5,   # Resume Sale           -> [NZA][DUA][ACK][EOC][BCC]
+        'B': 5,   # Set Rate              -> [NZA][DUA][ACK][EOC][BCC]
+        'I': 5,   # Set Density           -> [NZA][DUA][ACK][EOC][BCC]
+    }
+
+    def __init__(
+        self,
+        cfg: NozzleConfig,
+        transport: RS485Transport,
+        protocol_cfg: Dict,
+        on_transaction: Optional[Callable[[TransactionRecord], None]] = None,
+    ):
+        self.cfg = cfg                        # immutable nozzle config
+        self._t = transport                   # shared RS485 bus
+        self._pcfg = protocol_cfg             # timing parameters from config.yaml
+        self.on_transaction = on_transaction  # callback when transaction completes
+        self._state = PumpState.UNKNOWN       # last known pump state (updated by poll loop)
+        self._current_txn: Optional[TransactionRecord] = None   # active transaction (for future use)
+        self._running = False                 # controls the polling thread loop
+        self._thread: Optional[threading.Thread] = None          # background polling thread
+
+    # ── Low-level command helpers ─────────────────────────────────────────────
+
+    def _send(self, cmd_char: str, frame: bytes) -> bytes:
+        """
+        Send a frame and read the expected number of response bytes.
+
+        Looks up the expected response length from RESP_SIZE using the
+        command character, then delegates to transport.send_recv().
+
+        Args:
+            cmd_char (str)  : Single command character (e.g. 'S', 'A', 'O').
+                              Used to look up the expected response size.
+            frame    (bytes): Complete TQCL frame including BCC.
+
+        Returns:
+            bytes: Raw response bytes from the serial port.
+        """
+        expected = self.RESP_SIZE.get(cmd_char, 5)   # default 5 bytes if unknown
+        return self._t.send_recv(frame, expected)
+
+    def _retry(self, cmd_char: str, frame: bytes, parse_fn, retries: int, delay: float):
+        """
+        Send a command frame with retry logic, returning the first successful parse.
+
+        This is the central retry engine used by all named command methods.
+        It abstracts the pattern of:
+            send -> parse -> if parse failed -> wait -> send again -> ...
+
+        On each attempt:
+          1. Call _send() to transmit the frame and receive raw bytes
+          2. Call parse_fn(raw, nza, dua) to validate and parse the response
+          3. If parse_fn returns a non-None value, return it immediately
+          4. If parse_fn returns None (bad BCC, wrong length, etc.), log a warning
+          5. Wait `delay` seconds, then try again
+          6. After all retries exhausted, return None
+
+        Args:
+            cmd_char (str)       : Command character for RESP_SIZE lookup.
+            frame    (bytes)     : Complete TQCL command frame.
+            parse_fn (callable)  : Parser function from tqcl_protocol.py.
+                                   Signature: parse_fn(raw: bytes, nza: int, dua: int) -> Optional[T]
+                                   Examples: tqcl.parse_status_poll, tqcl.parse_ack_response
+            retries  (int)       : Maximum number of attempts (from protocol_cfg).
+            delay    (float)     : Seconds to wait between failed attempts.
+
+        Returns:
+            Parsed result (type depends on parse_fn) on first success, or None if
+            all retries are exhausted.
+
+        Notes:
+            - Any exception during send/parse (e.g. IOError from disconnected port)
+              is caught and logged as a warning; the retry continues.
+            - The delay is NOT applied after the last failed attempt.
+        """
+        for attempt in range(1, retries + 1):
+            try:
+                raw = self._send(cmd_char, frame)
+                result = parse_fn(raw, self.cfg.nza, self.cfg.dua)
+                if result is not None:
+                    return result   # successful parse - return immediately
+                log.warning("NZA 0x%02X attempt %d/%d: parse failed raw=%s",
+                            self.cfg.nza, attempt, retries, raw.hex(' ').upper())
+            except Exception as exc:
+                log.warning("NZA 0x%02X attempt %d/%d: %s", self.cfg.nza, attempt, retries, exc)
+            # Only sleep between attempts, not after the last one
+            if attempt < retries:
+                time.sleep(delay)
+        return None   # all retries exhausted
+
+    # ── Named command methods ─────────────────────────────────────────────────
+
+    def poll_status(self) -> Optional[tqcl.StatusResponse]:
+        """
+        Send a Status Poll command ('S') and return the parsed response.
+
+        This is the most frequently called command - sent every second per
+        nozzle by the background polling thread, and also called inline
+        during the transaction cycle to wait for state transitions.
+
+        Uses status_poll_retries and command_timeout from protocol_cfg.
+
+        Returns:
+            StatusResponse with current pump state and nozzle/motor flags,
+            or None if the dispenser does not respond after all retries.
+
+        Typical state values returned:
+            PumpState.IDLE        : Nozzle on hook, no customer
+            PumpState.CALL        : Nozzle lifted, waiting for authorisation
+            PumpState.FUELING     : Fuel is flowing
+            PumpState.PAYABLE     : Transaction complete, awaiting Clear Sale
+        """
+        frame = tqcl.cmd_status_poll(self.cfg.nza, self.cfg.dua)
+        return self._retry('S', frame, tqcl.parse_status_poll,
+                           self._pcfg['status_poll_retries'],
+                           self._pcfg['command_timeout'])
+
+    def pump_start(self) -> bool:
+        """
+        Send a Pump Start command ('O') to activate remote control mode.
+
+        This command must be sent before any transaction cycle to ensure
+        the dispenser is under master control. Without it, the dispenser
+        may operate in standalone mode and allow dispensing without authorisation.
+
+        Should be sent:
+          - At system startup for each nozzle
+          - After the pump was in STOPPED or IDLE state before a new transaction
+
+        Uses status_poll_retries (6 retries) from protocol_cfg.
+
+        Returns:
+            True  : Dispenser acknowledged ('Y') - remote mode activated.
+            False : Dispenser rejected ('X') or no response after retries.
+        """
+        frame = tqcl.cmd_pump_start(self.cfg.nza, self.cfg.dua)
+        result = self._retry('O', frame, tqcl.parse_ack_response,
+                             self._pcfg['status_poll_retries'],
+                             self._pcfg['command_timeout'])
+        ok = result is True
+        log.info("NZA 0x%02X pump_start: %s", self.cfg.nza, "OK" if ok else "FAILED")
+        return ok
+
+    def pump_stop(self) -> bool:
+        """
+        Send a Pump Stop command ('Z') to immediately halt fuel flow.
+
+        Used as an emergency stop when:
+          - The payable_timeout is exceeded (customer walked away)
+          - A hardware fault is detected
+          - An unexpected state is reached during the transaction cycle
+
+        After pump_stop(), the controller waits for PAYABLE or STOPPED state
+        before attempting to read and clear the transaction.
+
+        Returns:
+            True  : Pump stopped successfully.
+            False : Command failed (pump may already be stopped).
+        """
+        frame = tqcl.cmd_pump_stop(self.cfg.nza, self.cfg.dua)
+        result = self._retry('Z', frame, tqcl.parse_ack_response,
+                             self._pcfg['status_poll_retries'],
+                             self._pcfg['command_timeout'])
+        ok = result is True
+        log.info("NZA 0x%02X pump_stop: %s", self.cfg.nza, "OK" if ok else "FAILED")
+        return ok
+
+    def authorize(self) -> bool:
+        """
+        Send an Authorize command ('A') to grant permission for fueling.
+
+        This is the critical authorisation step in the transaction cycle.
+        It must be sent after Set Preset while the pump is in PRESET_READY state.
+        Only after receiving a positive ACK ('Y') will the dispenser allow fuel flow.
+
+        Retry policy (from wayne.bin reverse engineering):
+            5 retries, 100ms delay between attempts (authorize_retries, authorize_delay).
+            The dispenser may NAK the first attempt if it is still transitioning
+            to PRESET_READY state.
+
+        Returns:
+            True  : Authorisation accepted - dispenser will start fueling.
+            False : Authorisation rejected after all retries - transaction aborted.
+                    On False, the caller should send cancel_preset() to clean up.
+        """
+        frame = tqcl.cmd_authorize(self.cfg.nza, self.cfg.dua)
+        result = self._retry('A', frame, tqcl.parse_ack_response,
+                             self._pcfg['authorize_retries'],
+                             self._pcfg['command_timeout'])
+        ok = result is True
+        log.info("NZA 0x%02X authorize: %s", self.cfg.nza,
+                 "AUTHORIZATION SUCCESS" if ok else
+                 "AUTHORIZATION FAILED AFTER %d ATTEMPTS" % self._pcfg['authorize_retries'])
+        return ok
+
+    def set_preset(self, preset_type: PresetType, value: float) -> bool:
+        """
+        Send a Set Preset command ('P') to program the fill limit.
+
+        Programs the dispenser with the maximum fuel limit for the upcoming
+        transaction. The dispenser will automatically stop dispensing when
+        this limit is reached, even if the master does not send Pump Stop.
+
+        Must be called after the pump enters CALL state (nozzle lifted)
+        and before Authorize.
+
+        Two preset modes:
+            PresetType.AMOUNT : Stop when monetary amount reaches `value` INR.
+                                Used for customer-specified amount fills
+                                (e.g. "Fill for Rs. 500").
+            PresetType.VOLUME : Stop when volume reaches `value` litres.
+                                Used for specific volume fills
+                                (e.g. "Fill 20 litres").
+
+        For "full tank" fills with no customer-specified limit, set a large
+        AMOUNT preset (e.g. 5000.00 INR) which the customer is unlikely to reach.
+
+        Args:
+            preset_type (PresetType): AMOUNT or VOLUME.
+            value       (float)     : Limit value (INR for AMOUNT, litres for VOLUME).
+
+        Returns:
+            True  : Preset accepted by dispenser.
+            False : Preset rejected (dispenser not in correct state).
+        """
+        frame = tqcl.cmd_set_preset(self.cfg.nza, self.cfg.dua, preset_type, value)
+        result = self._retry('P', frame, tqcl.parse_ack_response,
+                             self._pcfg['authorize_retries'],
+                             self._pcfg['command_timeout'])
+        ok = result is True
+        log.info("NZA 0x%02X set_preset type=%s value=%.3f: %s",
+                 self.cfg.nza, preset_type.name, value, "OK" if ok else "FAILED")
+        return ok
+
+    def cancel_preset(self) -> bool:
+        """
+        Send a Cancel Preset command ('E') to abort a pending preset.
+
+        Used to clean up after a failed Authorize attempt. Cancels the
+        preset that was set by Set Preset, returning the dispenser to
+        no-preset mode so the nozzle can be re-used for the next customer.
+
+        Returns:
+            True  : Preset cancelled successfully.
+            False : Cancel failed (may not have been in preset state).
+        """
+        frame = tqcl.cmd_cancel_preset(self.cfg.nza, self.cfg.dua)
+        result = self._retry('E', frame, tqcl.parse_ack_response,
+                             self._pcfg['authorize_retries'],
+                             self._pcfg['command_timeout'])
+        return result is True
+
+    def clear_sale(self, txn_id: Optional[str] = None) -> bool:
+        """
+        Send a Clear Sale command ('F') to complete and close the transaction.
+
+        This is the LAST command of every transaction cycle. It tells the
+        dispenser that:
+          1. The master has successfully recorded the transaction data
+          2. The dispenser can clear its transaction buffer
+          3. The nozzle can return to IDLE for the next customer
+
+        Without Clear Sale, the dispenser remains in PAYABLE state and
+        will not serve the next customer.
+
+        If a transaction_id is provided, it is embedded in the frame as a
+        16-byte ASCII field for dispenser-side transaction logging (TQCL 8.2.3).
+
+        Args:
+            txn_id (str, optional): Transaction identifier to embed.
+                                    Format: '{YYYYMMDDHHmmss}{pump_char}{nozzle_id}'
+                                    Example: '20260328100000A1'
+                                    If None, the simple Clear Sale (8.2.2) is used.
+
+        Returns:
+            True  : Transaction cleared - dispenser returns to IDLE.
+            False : Clear failed (rare; dispenser may need manual reset).
+        """
+        frame = tqcl.cmd_clear_sale(self.cfg.nza, self.cfg.dua, txn_id)
+        result = self._retry('F', frame, tqcl.parse_ack_response,
+                             self._pcfg['status_poll_retries'],
+                             self._pcfg['command_timeout'])
+        ok = result is True
+        log.info("NZA 0x%02X clear_sale txn=%s: %s", self.cfg.nza, txn_id, "OK" if ok else "FAILED")
+        return ok
+
+    def read_transaction(self) -> Optional[tqcl.TransactionResponse]:
+        """
+        Send a Read Transaction command ('R') and return the transaction details.
+
+        Retrieves the completed transaction data from the dispenser:
+          - Unit price at time of sale (INR/litre)
+          - Volume dispensed (litres)
+          - Total amount charged (INR)
+
+        Must be called AFTER the pump enters PAYABLE state and BEFORE Clear Sale.
+        The dispenser holds this data until Clear Sale is sent.
+
+        Uses totalizer_retries (5 retries) from protocol_cfg.
+
+        Returns:
+            TransactionResponse with volume, amount, unit_price, or None if
+            the dispenser does not respond or the frame is corrupt.
+
+        Notes:
+            If this returns None (read failure), the transaction cycle continues
+            using 0.0 for volume/amount and the configured unit_price as fallback.
+            This ensures Clear Sale is always sent to unblock the dispenser.
+        """
+        frame = tqcl.cmd_read_transaction(self.cfg.nza, self.cfg.dua)
+        return self._retry('R', frame, tqcl.parse_read_transaction,
+                           self._pcfg['totalizer_retries'],
+                           self._pcfg['command_timeout'])
+
+    def read_volume_totalizer(self) -> Optional[tqcl.TotalizerResponse]:
+        """
+        Send a Read Volume Totalizer command ('T') and return the cumulative volume.
+
+        The volume totalizer is a non-resettable counter in the dispenser's NVRAM
+        that counts total litres dispensed since commissioning.
+
+        Called TWICE in each transaction:
+          - Before fueling: stot_volume (start totalizer)
+          - After fueling:  etot_volume (end totalizer)
+          - Difference = volume dispensed in this transaction (cross-check)
+
+        Uses totalizer_retries (5 retries) from protocol_cfg.
+
+        Returns:
+            TotalizerResponse with .totalizer as cumulative litres, or None.
+        """
+        frame = tqcl.cmd_read_volume_totalizer(self.cfg.nza, self.cfg.dua)
+        result = self._retry('T', frame, tqcl.parse_volume_totalizer,
+                             self._pcfg['totalizer_retries'],
+                             self._pcfg['command_timeout'])
+        if result:
+            log.info("NZA 0x%02X volume_totalizer: %.3f", self.cfg.nza, result.totalizer)
+        return result
+
+    def read_amount_totalizer(self) -> Optional[tqcl.TotalizerResponse]:
+        """
+        Send a Read Amount Totalizer command ('M') and return the cumulative amount.
+
+        Same usage pattern as read_volume_totalizer() but for monetary totals.
+        The amount totalizer counts total INR collected since commissioning.
+
+        Called TWICE in each transaction:
+          - Before fueling: stot_amount (start totalizer)
+          - After fueling:  etot_amount (end totalizer)
+          - Difference = amount charged in this transaction (cross-check)
+
+        Returns:
+            TotalizerResponse with .totalizer as cumulative INR, or None.
+        """
+        frame = tqcl.cmd_read_amount_totalizer(self.cfg.nza, self.cfg.dua)
+        result = self._retry('M', frame, tqcl.parse_amount_totalizer,
+                             self._pcfg['totalizer_retries'],
+                             self._pcfg['command_timeout'])
+        if result:
+            log.info("NZA 0x%02X amount_totalizer: %.3f", self.cfg.nza, result.totalizer)
+        return result
+
+    def set_rate(self, price: float) -> bool:
+        """
+        Send a Set Rate command ('B') to update the unit price on the dispenser.
+
+        Programs the dispenser's internal price per litre. The dispenser uses
+        this rate to calculate the monetary amount during fueling.
+
+        Typically called once at startup (or when prices change) for each nozzle.
+        The price is also stored in NozzleConfig.unit_price as a local reference.
+
+        Args:
+            price (float): Price per litre in INR. Example: 93.50.
+
+        Returns:
+            True  : Rate updated successfully.
+            False : Rate update failed (dispenser in wrong state).
+        """
+        frame = tqcl.cmd_set_rate(self.cfg.nza, self.cfg.dua, price)
+        result = self._retry('B', frame, tqcl.parse_ack_response,
+                             self._pcfg['status_poll_retries'],
+                             self._pcfg['command_timeout'])
+        ok = result is True
+        log.info("NZA 0x%02X set_rate %.2f: %s", self.cfg.nza, price, "OK" if ok else "FAILED")
+        return ok
+
+    # ── State wait helpers ────────────────────────────────────────────────────
+
+    def _wait_for_state(
+        self,
+        target_states,
+        timeout: float,
+        interval: float,
+        label: str,
+    ) -> Optional[PumpState]:
+        """
+        Poll the dispenser until a target state is reached or timeout expires.
+
+        Repeatedly calls poll_status() in a loop, sleeping `interval` seconds
+        between polls. Returns as soon as the current pump state matches any
+        of the target_states.
+
+        This method is the blocking wait primitive used throughout the
+        transaction cycle:
+          - Waiting for CALL (nozzle lift)
+          - Waiting for PRESET_READY
+          - Waiting for AUTHORIZED/FUELING
+          - Waiting for PAYABLE/STOPPED (fueling complete)
+
+        Timeout behaviour:
+          - Uses time.monotonic() for precise, drift-free timing
+          - On timeout, logs a WARNING and returns None
+          - Callers handle timeout: some abort the cycle, some force pump stop
+
+        Args:
+            target_states : Single PumpState value, or a list/set of PumpState values.
+                            The function returns as soon as the current state matches
+                            any member of this collection.
+            timeout (float)  : Maximum seconds to wait before giving up.
+            interval (float) : Seconds between poll attempts.
+                               Typically 0.25-1.0 seconds.
+            label (str)      : Human-readable description of what we are waiting for.
+                               Used in log messages. Example: 'PAYABLE/STOPPED'.
+
+        Returns:
+            PumpState: The matched state value when target is reached.
+            None     : Timeout expired without reaching any target state.
+
+        Side effect:
+            Updates self._state with the latest state from each poll response.
+        """
+        # Normalise single state to a list for uniform handling
+        if not isinstance(target_states, (list, tuple, set)):
+            target_states = [target_states]
+
+        deadline = time.monotonic() + timeout
+
+        while time.monotonic() < deadline:
+            resp = self.poll_status()
+            if resp:
+                self._state = resp.state     # keep state property up to date
+                if resp.state in target_states:
+                    log.info("NZA 0x%02X reached %s (waiting for %s)",
+                             self.cfg.nza, resp.state.name, label)
+                    return resp.state        # target reached
+                log.debug("NZA 0x%02X state=%s waiting for %s",
+                          self.cfg.nza, resp.state.name, label)
+            time.sleep(interval)
+
+        log.warning("NZA 0x%02X timeout waiting for %s", self.cfg.nza, label)
+        return None   # timeout
+
+    # ── Full transaction cycle ────────────────────────────────────────────────
+
+    def run_transaction_cycle(
+        self,
+        preset_type: PresetType,
+        preset_value: float,
+        txn_id: str,
+        txn_seq: int,
+        density: float = 0.830,
+    ) -> Optional[TransactionRecord]:
+        """
+        Execute the complete 14-step TQCL transaction flow for one fueling event.
+
+        This is the core method of the entire system. It is called from a
+        dedicated transaction thread (spawned by FuelAutomation._run_txn_thread)
+        and blocks for the entire duration of the customer's fueling session
+        (typically 2-10 minutes).
+
+        Flow:
+            1.  Check current pump state; abort if INOPERATIVE
+            2.  Issue Pump Start if pump is in IDLE/STOPPED/PAYABLE
+            3.  Wait for CALL state (nozzle lifted by customer)
+            4.  Send Set Preset (amount or volume limit)
+            5.  Wait for PRESET_READY state
+            6.  Send Authorize command (5 retries x 100ms)
+            7.  Wait for AUTHORIZED or FUELING state
+            8.  Read start totalizers (stot_volume, stot_amount)
+            9.  Wait for PAYABLE or STOPPED state (customer done fueling)
+           10.  Read transaction details (volume, amount, unit_price)
+           11.  Read end totalizers (etot_volume, etot_amount)
+           12.  Validate totalizer consistency (log warning if mismatch > 0.1L)
+           13.  Send Clear Sale with transaction ID
+           14.  Build TransactionRecord, fire on_transaction callback
+
+        Timeout/error handling:
+          - Step 3: If no nozzle lift within preset_timeout (90s) -> abort, return None
+          - Step 4-5: If set_preset fails -> abort, return None
+          - Step 6: If authorize fails -> cancel_preset(), abort, return None
+          - Step 9: If payable_timeout (300s) exceeded -> force pump_stop(), try to recover
+          - Steps 10-11: If read fails -> use 0.0 values; cycle continues to Clear Sale
+
+        Args:
+            preset_type  (PresetType): AMOUNT or VOLUME.
+            preset_value (float)     : Fill limit (INR for AMOUNT, litres for VOLUME).
+                                       Default in main.py: AMOUNT=5000.00 (Rs.5000 full tank).
+            txn_id       (str)       : Transaction ID string for Clear Sale and the record.
+                                       Format: '{YYYYMMDDHHmmss}{pump_char}{nozzle_id}'
+            txn_seq      (int)       : Transaction sequence number (assigned by publisher counter).
+            density      (float)     : Fuel density g/mL from config (default 0.830 for HSD).
+
+        Returns:
+            TransactionRecord: Completed record if the transaction ran to Clear Sale.
+            None             : If the cycle was aborted early (inoperative, auth failure, timeout).
+
+        Note:
+            Even if volume/amount data could not be read (steps 10-11), the method
+            will still attempt Clear Sale to unblock the dispenser for the next customer.
+            A TransactionRecord with zeros is returned in that case.
+
+        Thread safety:
+            This method is designed to run in its own thread. All RS485 bus access
+            is serialised by the threading.Lock() in RS485Transport.
+        """
+        nza = self.cfg.nza
+        pcfg = self._pcfg
+
+        log.info("NZA 0x%02X [%s] starting transaction cycle txn=%s",
+                 nza, self.cfg.product, txn_id)
+
+        # ── Step 1: Read current state; abort if hardware fault ───────────────
+        resp = self.poll_status()
+        if not resp:
+            log.error("NZA 0x%02X cannot read status", nza)
+            return None
+
+        if resp.state == PumpState.INOPERATIVE:
+            # Hardware fault on dispenser - cannot proceed
+            log.error("NZA 0x%02X INOPERATIVE - aborting", nza)
+            return None
+
+        # ── Step 2: Always send Pump Start to ensure remote control mode ────────
+        # Must be sent unconditionally — even when state is CALL — because the
+        # dispenser can lose remote mode after the nozzle is lifted.
+        # Without pump_start in remote mode, Set Preset and Authorize are rejected.
+        ok = self.pump_start()
+        if not ok:
+            log.warning("NZA 0x%02X pump_start rejected (may already be in remote mode)", nza)
+        time.sleep(0.5)    # brief pause for remote-mode transition
+
+        # ── Step 3: Wait for CALL state (customer lifts nozzle) ──────────────
+        log.info("NZA 0x%02X waiting for nozzle lift (CALL state)...", nza)
+        state = self._wait_for_state(
+            PumpState.CALL,
+            timeout=pcfg['preset_timeout'],       # 90 seconds
+            interval=pcfg['status_poll_interval'], # 1.0 second poll interval
+            label="CALL",
+        )
+        if not state:
+            # Customer did not lift nozzle within timeout
+            log.warning("NZA 0x%02X no nozzle lift detected within timeout", nza)
+            return None
+
+        # Record start time at moment of nozzle lift
+        start_time = datetime.now().isoformat(timespec='seconds')
+
+        # ── Step 4: Set Preset (with up to 3 attempts, 1s gap) ───────────────
+        # Log matches original wayne.bin function name for traceability
+        log.info("NZA 0x%02X In sendVolumePreset()" if preset_type == PresetType.VOLUME
+                 else "NZA 0x%02X In sendAmountPreset()", nza)
+        preset_sent = False
+        for preset_attempt in range(1, 4):
+            if self.set_preset(preset_type, preset_value):
+                preset_sent = True
+                break
+            log.warning("NZA 0x%02X set_preset attempt %d/3 failed - retrying in 1s",
+                        nza, preset_attempt)
+            time.sleep(1.0)    # give dispenser time to settle before retrying
+        if not preset_sent:
+            log.error("NZA 0x%02X set_preset failed after 3 attempts - aborting transaction", nza)
+            return None
+
+        # ── Step 5: Wait for PRESET_READY ────────────────────────────────────
+        state = self._wait_for_state(
+            PumpState.PRESET_READY,
+            timeout=5.0,    # should transition quickly
+            interval=0.2,
+            label="PRESET_READY",
+        )
+        if not state:
+            # Dispenser may skip directly to AUTHORIZED in some firmware versions
+            log.warning("NZA 0x%02X PRESET_READY not reached (may be OK)", nza)
+
+        # ── Step 6: Authorize fueling ─────────────────────────────────────────
+        log.info("NZA 0x%02X In sendAuthorizeCommand()", nza)
+        if not self.authorize():
+            # Authorization failed - cancel preset and abort
+            log.error("NZA 0x%02X AUTHORIZATION FAILED AFTER %d ATTEMPTS",
+                      nza, pcfg['authorize_retries'])
+            self.cancel_preset()    # clean up pending preset on dispenser
+            return None
+
+        log.info("NZA 0x%02X AUTHORIZATION SUCCESS", nza)
+
+        # ── Step 7: Wait for AUTHORIZED/FUELING ──────────────────────────────
+        # Multiple target states because firmware versions differ in which
+        # state they report after authorization
+        state = self._wait_for_state(
+            [PumpState.AUTHORIZED, PumpState.STARTED, PumpState.FUELING],
+            timeout=10.0,
+            interval=0.25,
+            label="AUTHORIZED/FUELING",
+        )
+        if not state:
+            log.warning("NZA 0x%02X did not reach AUTHORIZED state - fueling may still proceed", nza)
+
+        # ── Step 8: Read START totalizers ─────────────────────────────────────
+        # Capture cumulative counters BEFORE fuel flows for cross-check
+        log.info("NZA 0x%02X START TOTALIZER COMMAND SENT", nza)
+        stot_vol_resp = self.read_volume_totalizer()
+        stot_amt_resp = self.read_amount_totalizer()
+
+        stot_volume = stot_vol_resp.totalizer if stot_vol_resp else 0.0
+        stot_amount = stot_amt_resp.totalizer if stot_amt_resp else 0.0
+        log.info("NZA 0x%02X STOT_VOL --> %.3f", nza, stot_volume)
+        log.info("NZA 0x%02X STOT_AMT --> %.3f", nza, stot_amount)
+
+        # ── Step 9: Wait for PAYABLE/STOPPED ─────────────────────────────────
+        # Block until fueling is complete (preset reached or nozzle re-hung)
+        log.info("NZA 0x%02X __________FUELING__________", nza)
+        state = self._wait_for_state(
+            [PumpState.PAYABLE, PumpState.STOPPED, PumpState.SUSPENDED],
+            timeout=pcfg['payable_timeout'],        # 300 seconds max fueling time
+            interval=pcfg['fueling_poll_interval'], # poll frequency during fueling
+            label="PAYABLE/STOPPED",
+        )
+        if not state:
+            # Fueling ran past the maximum allowed time - force stop
+            log.error("NZA 0x%02X fueling timeout - forcing pump stop", nza)
+            self.pump_stop()
+            # Wait for pump to reach a terminal state after forced stop
+            state = self._wait_for_state(
+                [PumpState.PAYABLE, PumpState.STOPPED],
+                timeout=30.0,
+                interval=1.0,
+                label="PAYABLE after stop",
+            )
+
+        # Record end time when fueling finishes
+        end_time = datetime.now().isoformat(timespec='seconds')
+        log.info("NZA 0x%02X PUMP_STOPPED", nza)
+
+        # ── Step 10: Read transaction details ────────────────────────────────
+        txn_resp = self.read_transaction()
+        if not txn_resp:
+            # Read failed - use zero values; Clear Sale will still be sent
+            log.error("NZA 0x%02X read_transaction failed", nza)
+            txn_volume = 0.0
+            txn_amount = 0.0
+            unit_price = self.cfg.unit_price   # fall back to configured price
+        else:
+            txn_volume = txn_resp.volume
+            txn_amount = txn_resp.amount
+            # Use dispenser's price if non-zero, otherwise fall back to config
+            unit_price = txn_resp.unit_price or self.cfg.unit_price
+            log.info("NZA 0x%02X Read Txn: volume=%.3f amount=%.3f price=%.2f",
+                     nza, txn_volume, txn_amount, unit_price)
+
+        # ── Step 11: Read END totalizers ──────────────────────────────────────
+        # Capture cumulative counters AFTER fuel has stopped
+        log.info("NZA 0x%02X END TOTALIZER COMMAND SENT", nza)
+        etot_vol_resp = self.read_volume_totalizer()
+        etot_amt_resp = self.read_amount_totalizer()
+
+        etot_volume = etot_vol_resp.totalizer if etot_vol_resp else 0.0
+        etot_amount = etot_amt_resp.totalizer if etot_amt_resp else 0.0
+        log.info("NZA 0x%02X ETOT_VOL --> %.3f", nza, etot_volume)
+        log.info("NZA 0x%02X ETOT_AMT --> %.3f", nza, etot_amount)
+
+        # ── Step 12: Totalizer consistency check ──────────────────────────────
+        # The difference between end and start totalizers should match
+        # the transaction volume/amount from Read Transaction.
+        tot_vol_diff = round(etot_volume - stot_volume, 3)
+        tot_amt_diff = round(etot_amount - stot_amount, 2)
+        log.info("NZA 0x%02X transaction volume before adjustment: %.3f", nza, txn_volume)
+        # Warn if totalizer difference deviates more than 0.1L from transaction read
+        if abs(tot_vol_diff - txn_volume) > 0.1:
+            log.warning("NZA 0x%02X Response not matches with totalizer diff "
+                        "(txn=%.3f tot_diff=%.3f)", nza, txn_volume, tot_vol_diff)
+        log.info("NZA 0x%02X transaction volume after adjustment: %.3f", nza, txn_volume)
+        log.info("NZA 0x%02X transaction amount before adjustment: %.2f", nza, txn_amount)
+        log.info("NZA 0x%02X transaction amount after adjustment: %.2f", nza, txn_amount)
+
+        # ── Step 13: Clear Sale ───────────────────────────────────────────────
+        # MUST be sent to unblock the dispenser for the next customer.
+        # Embeds the transaction ID for dispenser-side audit logging.
+        self.clear_sale(txn_id=txn_id)
+
+        # ── Step 14: Build record and fire callback ───────────────────────────
+        record = TransactionRecord(
+            nozzle_id=self.cfg.nozzle_id,
+            product=self.cfg.product,
+            unit_price=unit_price,
+            preset_type='volume' if preset_type == PresetType.VOLUME else 'amount',
+            preset_value=preset_value,
+            stot_volume=stot_volume,
+            stot_amount=stot_amount,
+            etot_volume=etot_volume,
+            etot_amount=etot_amount,
+            volume=txn_volume,
+            amount=txn_amount,
+            start_time=start_time,
+            end_time=end_time,
+            transaction_id=txn_id,
+            density=density,
+        )
+
+        # Fire the callback (MQTTPublisher.publish_transaction) if registered
+        if self.on_transaction:
+            self.on_transaction(record)
+
+        return record
+
+    # ── Background polling thread ─────────────────────────────────────────────
+
+    def start_polling(self):
+        """
+        Start the background status polling thread for this nozzle.
+
+        Launches a daemon thread that continuously polls the dispenser's
+        status every `status_poll_interval` seconds. The thread updates
+        self._state so the main loop can check nozzle states without
+        blocking.
+
+        The thread is started once at system initialisation (after pump_start)
+        and runs for the lifetime of the process.
+
+        Thread properties:
+            - Named 'nozzle-{nozzle_id}' for easy identification in stack traces
+            - daemon=True: automatically killed when the main thread exits
+            - Stops gracefully when stop_polling() sets self._running = False
+        """
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._poll_loop,
+            daemon=True,
+            name=f"nozzle-{self.cfg.nozzle_id}",
+        )
+        self._thread.start()
+
+    def stop_polling(self):
+        """
+        Stop the background polling thread gracefully.
+
+        Sets the _running flag to False and waits up to 5 seconds for the
+        thread to finish its current poll iteration and exit.
+
+        Called during shutdown (SIGTERM/SIGINT handler in FuelAutomation._shutdown).
+        """
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=5)   # wait up to 5 seconds
+
+    def _poll_loop(self):
+        """
+        Background thread body: continuously polls nozzle status.
+
+        Runs until self._running is set to False by stop_polling().
+        Each iteration:
+          1. Calls poll_status() to get current state
+          2. If state changed since last poll, logs a state transition message
+          3. Updates self._state
+          4. Sleeps for status_poll_interval seconds
+
+        State transition logging:
+            Any state change triggers an INFO log so operators can observe
+            the full transaction lifecycle in real time.
+            Example:
+                "NZA 0x01 state change: IDLE -> CALL"
+                "NZA 0x01 state change: CALL -> PRESET_READY"
+                "NZA 0x01 state change: FUELING -> PAYABLE"
+
+        Error handling:
+            Any exception during polling (e.g. serial disconnection) is caught,
+            logged as ERROR, and the loop continues after the sleep interval.
+            This prevents a single bad poll from crashing the polling thread.
+        """
+        interval = self._pcfg['status_poll_interval']
+        while self._running:
+            try:
+                resp = self.poll_status()
+                if resp:
+                    if resp.state != self._state:
+                        # State has changed - log the transition
+                        log.info("NZA 0x%02X state change: %s -> %s",
+                                 self.cfg.nza,
+                                 self._state.name if self._state != PumpState.UNKNOWN else "UNKNOWN",
+                                 resp.state.name)
+                    self._state = resp.state   # update cached state
+            except Exception as exc:
+                log.error("NZA 0x%02X poll error: %s", self.cfg.nza, exc)
+            time.sleep(interval)
+
+    @property
+    def current_state(self) -> PumpState:
+        """
+        Read the most recently observed pump state (thread-safe property).
+
+        The main loop in FuelAutomation reads this property every
+        `status_poll_interval` seconds to detect when a nozzle enters
+        CALL state (customer lifted nozzle), which triggers a transaction thread.
+
+        Returns:
+            PumpState: Last state seen by the polling thread.
+                       PumpState.UNKNOWN if no successful poll has been made yet.
+
+        Thread safety:
+            Reading a Python integer attribute is atomic (GIL-protected).
+            No explicit locking is needed for this read-only property.
+        """
+        return self._state

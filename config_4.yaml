@@ -1,0 +1,282 @@
+# ============================================================
+# RPi4 Fuel Automation - Site & Pump Configuration
+# Site: CPCL 392203  —  Device: 192.168.2.195 (cpcl-RO1-3)
+# MPD: 2-channel, 4 nozzles (HSD + MS per side)
+#   S1 side = Pump 09  (SA=0x40)
+#   S2 side = Pump 10  (SA=0x41)
+# Built from 192.168.2.194 template; pump numbers + identity fields adjusted.
+# ============================================================
+
+site:
+  id: "CPCL_392203"
+  name: "CPCL_392203_4"
+  serial_number: "32602097"       # DU serial number
+
+mpd_type: "tatsuno"
+
+mpd_no: "4"
+serial:
+  port: "/dev/rs485"
+  baud_rate: 19200
+  byte_size: 8
+  parity: "E"
+  stop_bits: 1
+  timeout: 0.15
+  inter_command_gap: 0.50
+
+dispensers:
+  # Pump 09 — S1 side — SA=0x40 — Channel 1  (Diesel nozzle first, Petrol second)
+  - du_id: 9
+    dua: 0x41
+    sa: 0x48   # DU 9
+    label: "MPD4-P9"
+    nozzles:
+      - nza: 0x01
+        nozzle_number: 1
+        nozzle_id: 1
+        product: "HSD"
+        product_code: 5
+        unit_price: 99.56
+        preset_type: "amount"
+        preset_value: 99999.99
+        enabled: true
+      - nza: 0x02
+        nozzle_number: 2
+        nozzle_id: 2
+        product: "MS"
+        product_code: 4
+        unit_price: 107.75
+        preset_type: "amount"
+        preset_value: 99999.99
+        enabled: true
+
+  # Pump 10 — S2 side — SA=0x41 — Channel 2  (Petrol nozzle first, Diesel second)
+  # NOTE: MPD uses global nozzle numbering — SA=0x41 reports nozzle 3 & 4 in TDC 68
+  # auth_slot overrides: TDC 78 uses local slot numbers (1,2) within each dispenser unit,
+  # even though TDC 68 status reports global numbers (3,4).
+  - du_id: 10
+    dua: 0x41
+    sa: 0x49   # DU 10
+    label: "MPD4-P10"
+    nozzles:
+      - nza: 0x01
+        nozzle_number: 3
+        nozzle_id: 3
+        product: "MS"
+        product_code: 4
+        unit_price: 107.75
+        preset_type: "amount"
+        preset_value: 99999.99
+        enabled: true
+      - nza: 0x02
+        nozzle_number: 4
+        nozzle_id: 4
+        product: "HSD"
+        product_code: 5
+        unit_price: 99.56
+        preset_type: "amount"
+        preset_value: 99999.99
+        enabled: true
+
+protocol:
+  status_poll_interval: 0.5
+  status_poll_retries: 3
+  authorize_retries: 3
+  totalizer_retries: 3
+  command_timeout: 0.2
+  preset_timeout: 90
+  fueling_poll_interval: 0.5
+  payable_timeout: 300
+  post_txn_holdoff: 5.0          # pause polling 5s after TDC27 (prevents garbled display)
+  time_sync_interval: 0
+
+mqtt:
+  enabled: true
+  broker: "ar7fthu9bpn11-ats.iot.ap-south-1.amazonaws.com"
+  port: 8883
+  client_id: "BPCL_392203_RPI4"   # unique — kept from existing .195 setup
+  auth_mode: "cert"
+  ca_cert:   "/etc/fuel-automation/certs/AmazonRootCA1.pem"
+  cert_file: "/etc/fuel-automation/certs/device.crt"
+  key_file:  "/etc/fuel-automation/certs/device.key"
+  topic_template: "fuel-automation/{site_id}/transactions"
+  qos: 1
+  retain: false
+  reconnect_delay: 5
+
+# ── Device heartbeat / health pulse ────────────────────────────────────────
+# Periodic MQTT publish so TMS can show device health AND track DHCP IP
+# changes immediately.  Topic: fuel-automation/device_status/<serial>.
+heartbeat:
+  enabled: true
+  interval: 30
+  qos: 1
+  retain: true
+  topic_template: "fuel-automation/device_status/{serial}"
+
+
+# ── IndianOil / CPCL price-update subscriber ───────────────────────────────
+# Subscribes to IndianOil's upstream price feed and saves incoming prices to
+# /var/lib/fuel-automation/cpcl_pending_prices.json.  Pending prices are then
+# applied to all dispensers at price_apply_time daily (default 06:00) so that
+# rate changes hit the pumps at the same moment each morning — independent of
+# when the MQTT message actually arrives.
+#
+# Manual TMS-pushed prices (rate_update topic) bypass this and apply
+# immediately — this block only governs the upstream IndianOil feed.
+#
+# Topic format from IndianOil:
+#   IOT/CPCL/<sapcode>/PRICE
+#
+# Message format:
+#   {"04": {"price": "101.00", "eff_from": "2026-03-22"},
+#    "05": {"price": " 92.58", "eff_from": "2026-03-22"}}
+#     "04" = MS / Petrol (product_code 4)
+#     "05" = HSD / Diesel (product_code 5)
+cpcl_price:
+  enabled: true
+  broker: "upkaran.indianoil.co.in"
+  port: 8883
+  username: "admin"
+  password: "admin123"
+  topic: "IOT/CPCL/392203/PRICE"
+  tls: true
+  tls_insecure: true                # IndianOil server uses self-signed cert
+  reconnect_delay: 15
+  price_apply_time: "06:00"         # HH:MM — saved prices applied at this time daily
+
+transaction:
+  key_template: "{site_id}_{du_id}_{product}_NOZZLE_{nozzle_id}"
+  transaction_count_file: "/var/lib/fuel-automation/txn_count.json"
+  density_default: 0.830
+
+ble:
+  enabled: true
+  adv_prefix: "REL"
+  sap_code: "392203"
+  fcc_code: "FCC_392203_01"          # unique — kept from existing .195 setup
+  software_revision: "v2.5.0"
+
+  dispensers:
+    - du_no: "9"
+      du_id: 9
+      label: "Pump-09"
+      nozzles: [1, 2]
+
+    - du_no: "10"
+      du_id: 10
+      label: "Pump-10"
+      nozzles: [1, 2]
+
+  serial_port: "/dev/esp32"
+  serial_baud: 115200
+  mtu: 512
+  session_timeout: 30
+  reconnect_delay: 5.0
+
+logging:
+  level: "DEBUG"
+  file: "/var/log/fuel-automation/rpi_automation.log"
+  max_bytes: 10485760
+  backup_count: 5
+  console: true
+
+
+# CPCL per-transaction publisher — pushes every completed sale to IOCL.
+# Topic: IOT/CPCL/<ro_code>/DU_<mpd_no>/TX
+cpcl_tx:
+  enabled: true
+  broker: "upkaran.indianoil.co.in"
+  port: 8883
+  username: "admin"
+  password: "admin123"
+  topic_template: "IOT/CPCL/{ro_code}/DU_{du_no}/TX"
+  ro_code: "392203"
+  mpd_no: "2"
+  tls: true
+  tls_insecure: true
+  reconnect_delay: 15
+  start_tx_id: 1
+
+
+# Tank-alert subscriber (ATG → MPD interlock, TMS UI → MPD interlock).
+# Subscribed on IOCL broker (for ATG) AND on AWS IoT broker via cloud_publisher (for TMS UI).
+tank_alert:
+  enabled: true
+  broker: "upkaran.indianoil.co.in"
+  port: 8883
+  username: "admin"
+  password: "admin123"
+  ro_code: "392203"
+  tls: true
+  tls_insecure: true
+  reconnect_delay: 15
+
+
+# ── Tank-alert subscriber (ATG → MPD interlock + TMS UI → MPD interlock) ──
+tank_alert:
+  enabled: true
+  broker: "upkaran.indianoil.co.in"
+  port: 8883
+  username: "admin"
+  password: "admin123"
+  ro_code: "392203"
+  tls: true
+  tls_insecure: true
+  reconnect_delay: 15
+
+# ── CPCL master-data subscriber (DU_MASTER only on MPD Pis) ───────────────
+cpcl_master:
+  enabled: true
+  subscribe_du_master: true
+  subscribe_tank_master: false
+
+# ── DU_STATUS periodic snapshot ───────────────────────────────────────────
+cpcl_du_status:
+  enabled: true
+  publish_interval_sec: 300
+
+# ── DEVICE_PARAMS Pi-health heartbeat (live, no dry-run) ─────────────────
+cpcl_device_params:
+  enabled: true
+  publish_interval_sec: 300
+  dry_run: false
+
+# ── PRICE/STATUS feedback after MPD price write ──────────────────────────
+cpcl_price_status:
+  enabled: true
+  test_publish_on_start: false
+
+
+# CPCL / IOCL density-feed subscriber (immediate apply mode).
+# Receives IOT/CPCL/<ro>/DENSITY and writes to MPDs IMMEDIATELY
+# (instead of saving to pending and applying at 06:00).
+cpcl_density:
+  enabled: false   # LEGACY TOPIC DISABLED by JSON kill-switch
+  broker: "upkaran.indianoil.co.in"
+  port: 8883
+  username: "admin"
+  password: "admin123"
+  topic: "IOT/CPCL/392203/DENSITY"
+  tls: true
+  tls_insecure: true
+  reconnect_delay: 15
+  immediate_apply: true       # apply right away, no 06:00 schedule
+
+cpcl_density_v2:
+  enabled: true
+  broker: "upkaran.indianoil.co.in"
+  port: 8883
+  username: "admin"
+  password: "admin123"
+  topic: "IOT/CPCL/{ro_code}/DU_{du_no}/DENSITY"
+  tls: true
+  tls_insecure: true
+  reconnect_delay: 60
+
+# Local ATG interlock subscriber (on-site broker, no internet)
+local_interlock:
+  enabled: true
+  broker: "cpcl-RO11-atg1.local"
+  port: 1883
+  reconnect_delay: 30

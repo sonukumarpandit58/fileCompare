@@ -1,0 +1,203 @@
+# ============================================================
+# RPi4 Fuel Automation — CPCL 393999 MPD-1
+# Device: 192.168.1.34   MAC: 88:a2:9e:e0:60:a0
+# ------------------------------------------------------------
+# Layout (from IOCL DU_MASTER received 07-Jul-2026):
+#   DU_NO=1, 2 pumps, 1 nozzle each
+#     Pump 1  (SA=0x40)  Nozzle 1 · HSD · Tank 2
+#     Pump 2  (SA=0x41)  Nozzle 2 · HSD · Tank 3
+# NOTE: SA guessed as 0x3F + PUMP_ID. If handshake fails, adjust
+#       the sa: value to match the pump's physical DIP switch.
+# ============================================================
+
+site:
+  id: "CPCL_393999"
+  name: "CPCL_393999_1"
+  serial_number: "88:a2:9e:e0:60:a0"
+
+mpd_type: "tatsuno"
+
+mpd_no: "1"
+serial:
+  port: "/dev/rs485"
+  baud_rate: 19200
+  byte_size: 8
+  parity: "E"
+  stop_bits: 1
+  timeout: 0.15
+  inter_command_gap: 0.50
+
+dispensers:
+  # Pump 1 — SA=0x40 — 1 nozzle
+  - du_id: 1
+    dua: 0x41
+    sa: 0x40
+    label: "MPD1-P1"
+    nozzles:
+      - nza: 0x01
+        nozzle_number: 1
+        nozzle_id: 1
+        product: "HSD"
+        product_code: 5
+        tank_no: 2
+        unit_price: 99.8
+        preset_type: "amount"
+        preset_value: 99999.99
+        enabled: true
+
+  # Pump 2 — SA=0x41 — 1 nozzle
+  - du_id: 2
+    dua: 0x41
+    sa: 0x41
+    label: "MPD1-P2"
+    nozzles:
+      - nza: 0x02
+        nozzle_number: 2
+        nozzle_id: 2
+        product: "HSD"
+        product_code: 5
+        tank_no: 3
+        unit_price: 99.8
+        preset_type: "amount"
+        preset_value: 99999.99
+        enabled: true
+
+protocol:
+  status_poll_interval: 0.5
+  status_poll_retries: 3
+  authorize_retries: 3
+  totalizer_retries: 3
+  command_timeout: 0.2
+  preset_timeout: 90
+  fueling_poll_interval: 0.5
+  payable_timeout: 300
+  post_txn_holdoff: 5.0
+  time_sync_interval: 0
+
+mqtt:
+  enabled: true
+  broker: "ar7fthu9bpn11-ats.iot.ap-south-1.amazonaws.com"
+  port: 8883
+  client_id: "BPCL_392203_RPI4"
+  auth_mode: "cert"
+  ca_cert:   "/etc/fuel-automation/certs/AmazonRootCA1.pem"
+  cert_file: "/etc/fuel-automation/certs/device.crt"
+  key_file:  "/etc/fuel-automation/certs/device.key"
+  topic_template: "fuel-automation/{site_id}/transactions"
+  qos: 1
+  retain: false
+  reconnect_delay: 5
+
+heartbeat:
+  enabled: true
+  interval: 30
+  qos: 1
+  retain: true
+  topic_template: "fuel-automation/device_status/{serial}"
+
+cpcl_price:
+  enabled: true
+  broker: "upkaran.indianoil.co.in"
+  port: 8883
+  username: "admin"
+  password: "admin123"
+  topic: "IOT/CPCL/393999/PRICE"
+  tls: true
+  tls_insecure: true
+  reconnect_delay: 15
+  price_apply_time: "06:00"
+
+transaction:
+  key_template: "{site_id}_{du_id}_{product}_NOZZLE_{nozzle_id}"
+  transaction_count_file: "/var/lib/fuel-automation/txn_count.json"
+  density_default: 0.830
+
+ble:
+  enabled: true
+  adv_prefix: "REL"
+  sap_code: "393999"
+  fcc_code: "FCC_393999_01"
+  software_revision: "v2.5.0"
+  dispensers:
+    - du_no: "1"
+      du_id: 1
+      label: "Pump-01"
+      nozzles: [1]
+    - du_no: "2"
+      du_id: 2
+      label: "Pump-02"
+      nozzles: [1]
+  serial_port: "/dev/esp32"
+  serial_baud: 115200
+  mtu: 512
+  session_timeout: 30
+  reconnect_delay: 5.0
+
+logging:
+  level: "DEBUG"
+  file: "/var/log/fuel-automation/rpi_automation.log"
+  max_bytes: 10485760
+  backup_count: 5
+  console: true
+
+cpcl_tx:
+  enabled: true
+  broker: "upkaran.indianoil.co.in"
+  port: 8883
+  username: "admin"
+  password: "admin123"
+  topic_template: "IOT/CPCL/{ro_code}/DU_{du_no}/TX"
+  ro_code: "393999"
+  tls: true
+  tls_insecure: true
+  reconnect_delay: 15
+  start_tx_id: 1
+
+tank_alert:
+  enabled: true
+  broker: "upkaran.indianoil.co.in"
+  port: 8883
+  username: "admin"
+  password: "admin123"
+  ro_code: "393999"
+  tls: true
+  tls_insecure: true
+  reconnect_delay: 15
+
+cpcl_master:
+  enabled: true
+  subscribe_du_master: true
+  subscribe_tank_master: false
+
+cpcl_du_status:
+  enabled: true
+  publish_interval_sec: 300
+
+cpcl_device_params:
+  enabled: true
+  publish_interval_sec: 300
+  dry_run: false
+
+cpcl_price_status:
+  enabled: true
+  test_publish_on_start: false
+
+cpcl_density:
+  enabled: false
+
+cpcl_density_v2:
+  enabled: true
+  broker: "upkaran.indianoil.co.in"
+  port: 8883
+  username: "admin"
+  password: "admin123"
+  topic: "IOT/CPCL/{ro_code}/DU_{du_no}/DENSITY"
+  tls: true
+  tls_insecure: true
+  reconnect_delay: 60
+
+local_interlock:
+  enabled: false
+  broker: "192.168.1.38"      # ATG Pi's IP — LAN interlock feed
+  port: 1883
+  reconnect_delay: 30

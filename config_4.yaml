@@ -1,20 +1,19 @@
 # ============================================================
 # RPi4 Fuel Automation - Site & Pump Configuration
-# Site: CPCL 392203  —  Device: 192.168.2.195 (cpcl-RO1-3)
-# MPD: 2-channel, 4 nozzles (HSD + MS per side)
-#   S1 side = Pump 09  (SA=0x40)
-#   S2 side = Pump 10  (SA=0x41)
-# Built from 192.168.2.194 template; pump numbers + identity fields adjusted.
+# Site: BPCL RO 392203  —  Device: 192.168.2.101
+# MPD: 2-channel, 4 nozzles (MS + HSD per side)
+#   S1 side = Pump 07  (SA=0x40)
+#   S2 side = Pump 08  (SA=0x41)
 # ============================================================
 
 site:
   id: "CPCL_392203"
-  name: "CPCL_392203_4"
-  serial_number: "32602097"       # DU serial number
+  name: "CPCL_392203_3"
+  serial_number: "32602098"       # DU serial number
 
 mpd_type: "tatsuno"
 
-mpd_no: "4"
+mpd_no: "3"
 serial:
   port: "/dev/rs485"
   baud_rate: 19200
@@ -25,11 +24,11 @@ serial:
   inter_command_gap: 0.50
 
 dispensers:
-  # Pump 09 — S1 side — SA=0x40 — Channel 1  (Diesel nozzle first, Petrol second)
-  - du_id: 9
+  # Pump 07 — S1 side — SA=0x40 — Channel 1  (Diesel nozzle first, Petrol second)
+  - du_id: 7
     dua: 0x41
-    sa: 0x48   # DU 9
-    label: "MPD4-P9"
+    sa: 0x46   # DU 7
+    label: "MPD3-P7"
     nozzles:
       - nza: 0x01
         nozzle_number: 1
@@ -50,14 +49,14 @@ dispensers:
         preset_value: 99999.99
         enabled: true
 
-  # Pump 10 — S2 side — SA=0x41 — Channel 2  (Petrol nozzle first, Diesel second)
+  # Pump 08 — S2 side — SA=0x41 — Channel 2  (Petrol nozzle first, Diesel second)
   # NOTE: MPD uses global nozzle numbering — SA=0x41 reports nozzle 3 & 4 in TDC 68
   # auth_slot overrides: TDC 78 uses local slot numbers (1,2) within each dispenser unit,
   # even though TDC 68 status reports global numbers (3,4).
-  - du_id: 10
+  - du_id: 8
     dua: 0x41
-    sa: 0x49   # DU 10
-    label: "MPD4-P10"
+    sa: 0x47   # DU 8
+    label: "MPD3-P8"
     nozzles:
       - nza: 0x01
         nozzle_number: 3
@@ -94,7 +93,7 @@ mqtt:
   enabled: true
   broker: "ar7fthu9bpn11-ats.iot.ap-south-1.amazonaws.com"
   port: 8883
-  client_id: "BPCL_392203_RPI4"   # unique — kept from existing .195 setup
+  client_id: "BPCL_392203_32602098"   # unique — second RPi at this site
   auth_mode: "cert"
   ca_cert:   "/etc/fuel-automation/certs/AmazonRootCA1.pem"
   cert_file: "/etc/fuel-automation/certs/device.crt"
@@ -103,6 +102,7 @@ mqtt:
   qos: 1
   retain: false
   reconnect_delay: 5
+
 
 # ── Device heartbeat / health pulse ────────────────────────────────────────
 # Periodic MQTT publish so TMS can show device health AND track DHCP IP
@@ -154,18 +154,18 @@ ble:
   enabled: true
   adv_prefix: "REL"
   sap_code: "392203"
-  fcc_code: "FCC_392203_01"          # unique — kept from existing .195 setup
+  fcc_code: "FCC_392203_02"          # unique — second FCC unit at this site
   software_revision: "v2.5.0"
 
   dispensers:
-    - du_no: "9"
-      du_id: 9
-      label: "Pump-09"
+    - du_no: "7"
+      du_id: 7
+      label: "Pump-07"
       nozzles: [1, 2]
 
-    - du_no: "10"
-      du_id: 10
-      label: "Pump-10"
+    - du_no: "8"
+      du_id: 8
+      label: "Pump-08"
       nozzles: [1, 2]
 
   serial_port: "/dev/esp32"
@@ -181,9 +181,10 @@ logging:
   backup_count: 5
   console: true
 
+cpcl_tx:
 
 # CPCL per-transaction publisher — pushes every completed sale to IOCL.
-# Topic: IOT/CPCL/<ro_code>/DU_<mpd_no>/TX
+# Topic: IOT/CPCL/<ro_code>/DU_<du_no>/TX
 cpcl_tx:
   enabled: true
   broker: "upkaran.indianoil.co.in"
@@ -192,15 +193,17 @@ cpcl_tx:
   password: "admin123"
   topic_template: "IOT/CPCL/{ro_code}/DU_{du_no}/TX"
   ro_code: "392203"
-  mpd_no: "2"
   tls: true
   tls_insecure: true
   reconnect_delay: 15
   start_tx_id: 1
 
 
-# Tank-alert subscriber (ATG → MPD interlock, TMS UI → MPD interlock).
-# Subscribed on IOCL broker (for ATG) AND on AWS IoT broker via cloud_publisher (for TMS UI).
+# Tank-alert subscriber (ATG → MPD interlock).
+# When ATG publishes {"product":"MS","action":"block"} to
+#   fuel-automation/tank_alert/<ro_code>
+# this MPD locks every nozzle dispensing that product (via nozzle_locks.json).
+# Broker settings fall back to cpcl_tx / cpcl_price if unset.
 tank_alert:
   enabled: true
   broker: "upkaran.indianoil.co.in"

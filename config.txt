@@ -1,13 +1,11 @@
 # ============================================================
 # RPi4 Fuel Automation — CPCL 393999 MPD-1
-# Device: 192.168.1.34   MAC: 88:a2:9e:e0:60:a0
+# MAC: 88:a2:9e:e0:60:a0
 # ------------------------------------------------------------
-# Layout (from IOCL DU_MASTER received 07-Jul-2026):
-#   DU_NO=1, 2 pumps, 1 nozzle each
-#     Pump 1  (SA=0x40)  Nozzle 1 · HSD · Tank 2
-#     Pump 2  (SA=0x41)  Nozzle 2 · HSD · Tank 3
-# NOTE: SA guessed as 0x3F + PUMP_ID. If handshake fails, adjust
-#       the sa: value to match the pump's physical DIP switch.
+# Layout (from IOCL DU_MASTER):
+#   DU_NO=1, 2 pumps × 1 nozzle = 2 nozzles
+#     Pump 1  (SA=0x40)  Nz1·HSD·T2
+#     Pump 2  (SA=0x41)  Nz2·HSD·T3
 # ============================================================
 
 site:
@@ -19,7 +17,7 @@ mpd_type: "tatsuno"
 
 mpd_no: "1"
 serial:
-  port: "/dev/rs485"
+  port: "/dev/ttyUSB0"
   baud_rate: 19200
   byte_size: 8
   parity: "E"
@@ -28,7 +26,7 @@ serial:
   inter_command_gap: 0.50
 
 dispensers:
-  # Pump 1 — SA=0x40 — 1 nozzle
+  # Pump 1 — SA=0x40 — Nz1(HSD,T2)
   - du_id: 1
     dua: 0x41
     sa: 0x40
@@ -45,7 +43,7 @@ dispensers:
         preset_value: 99999.99
         enabled: true
 
-  # Pump 2 — SA=0x41 — 1 nozzle
+  # Pump 2 — SA=0x41 — Nz2(HSD,T3)
   - du_id: 2
     dua: 0x41
     sa: 0x41
@@ -113,7 +111,7 @@ transaction:
   density_default: 0.830
 
 ble:
-  enabled: true
+  enabled: false
   adv_prefix: "REL"
   sap_code: "393999"
   fcc_code: "FCC_393999_01"
@@ -197,7 +195,7 @@ cpcl_density_v2:
   reconnect_delay: 60
 
 local_interlock:
-  enabled: false
-  broker: "192.168.1.38"      # ATG Pi's IP — LAN interlock feed
+  enabled: true
+  broker: "192.168.1.38"
   port: 1883
   reconnect_delay: 30

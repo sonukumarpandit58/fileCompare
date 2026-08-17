@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
+        xmlns:android="http://schemas.android.com/apk/res/android"
+        xmlns:tools="http://schemas.android.com/tools"
+        id="nwaresoft-cordova-plugin-a920"
+        version="0.0.1">
+    <name>nwaresoft-cordova-plugin-a920</name>
+    <description>A plugin for A920 SDK Neptune Lite by Nwaresoft</description>
+    <license>MIT</license>
+    <keywords>cordova,android,a920,neptune,lite,sdk,nwaresoft</keywords>
+
+    <engines>
+        <engine name="cordova" version=">=3.0.0"/>
+    </engines>
+
+    <js-module src="www/a920.js" name="a920">
+        <clobbers target="window.plugins.a920" />
+    </js-module>
+
+    <platform name="android">
+        <!-- Permissions -->
+        <config-file target="AndroidManifest.xml" parent="/manifest">
+            <uses-permission android:name="com.pax.permission.ICC" />
+            <uses-permission android:name="com.pax.permission.PICC" />
+            <uses-permission android:name="com.pax.permission.MAGCARD" />
+            <uses-permission android:name="com.pax.permission.PRINTER" />
+            <uses-permission android:name="com.pax.permission.PED" />
+            <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+            <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+            <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+            <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+            <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
+
+            <uses-permission android:name="android.permission.READ_PRIVILEGED_PHONE_STATE"/>
+
+            <!-- Required for AppKeepAliveService foreground service (LMK prevention) -->
+            <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+            <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+        </config-file>
+
+        <!-- Feature registration -->
+        <config-file target="res/xml/config.xml" parent="/*">
+            <feature name="A920">
+                <param name="android-package" value="com.nwaresoft.cordova.plugin.A920"/>
+            </feature>
+        </config-file>
+
+        <!-- Add intent-filter to MainActivity (SAFE way) -->
+        <config-file target="AndroidManifest.xml" parent="/manifest/application/activity[@android:name='MainActivity']">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </config-file>
+
+        <!-- Additional activities -->
+        <config-file target="AndroidManifest.xml" parent="/manifest/application">
+            <!-- <activity android:name="com.firstdata.merchantservicessdk.MSApiActivity"
+                      android:clearTaskOnLaunch="true"
+                      android:configChanges="orientation|keyboardHidden|screenSize"
+                      android:theme="@style/Theme.AppCompat.NoActionBar"
+                      android:windowSoftInputMode="stateAlwaysHidden"
+                      android:exported="false" /> -->
+
+            <!-- AppKeepAliveService: keeps process in perceptible tier to prevent LMK kills during payment -->
+            <service
+                android:name="com.nwaresoft.cordova.plugin.AppKeepAliveService"
+                android:exported="false"
+                android:foregroundServiceType="dataSync" />
+
+            <!-- DT Plus Registration Activity -->
+            <activity
+                android:name="com.fiserv.fuel_app.view.RegistrationActivity"
+                android:exported="true"
+                android:launchMode="singleTop">
+
+                <intent-filter>
+                    <action android:name="com.fsrv.hpcl.REGISTRATION_ACTION"/>
+                    <category android:name="android.intent.category.DEFAULT"/>
+                </intent-filter>
+
+            </activity>
+        </config-file>
+
+        <!-- Java source files -->
+        <source-file src="src/android/A920.java" target-dir="src/com/nwaresoft/cordova/plugin" />
+        <source-file src="src/android/VehicleNumberPlateValidator.java" target-dir="src/com/nwaresoft/cordova/plugin" />
+        <source-file src="src/android/PowerConnectionReceiver.java" target-dir="src/com/nwaresoft/cordova/plugin" />
+        <source-file src="src/android/ApiReqRes.java" target-dir="src/com/nwaresoft/cordova/plugin" />
+        <source-file src="src/android/AppRequest.java" target-dir="src/com/nwaresoft/cordova/plugin" />
+        <source-file src="src/android/CountryCode.java" target-dir="src/com/nwaresoft/cordova/plugin" />
+        <source-file src="src/android/JsonUtil.java" target-dir="src/com/nwaresoft/cordova/plugin" />
+        <source-file src="src/android/SSLSocketClient.java" target-dir="src/com/nwaresoft/cordova/plugin" />
+        <source-file src="src/android/DelegatingSocketFactory.java" target-dir="src/com/nwaresoft/cordova/plugin" />
+
+        <source-file src="src/android/AppKeepAliveService.java" target-dir="src/com/nwaresoft/cordova/plugin" />
+        <source-file src="src/android/NotificationHelper.java" target-dir="src/com/nwaresoft/cordova/plugin" />
+        <source-file src="src/android/NotificationSetterGetter.java" target-dir="src/com/nwaresoft/cordova/plugin" />
+
+        <!-- DT Plus -->
+        <source-file src="src/android/RegistrationActivity.java" target-dir="src/com/fiserv/fuel_app/view" />
+        <source-file src="src/android/ApiHelper.java" target-dir="src/com/nwaresoft/cordova/plugin" />
+        <source-file src="src/android/Helper.java" target-dir="src/com/nwaresoft/cordova/plugin" />
+
+        <!-- AAR and JAR libraries -->
+        <lib-file src="src/android/libs/NeptuneLiteApi_V4.01.00_20230714.jar" target-dir="libs" />
+        <source-file src="src/android/jniLibs/armeabi-v7a/libDeviceConfig.so"
+             target-dir="app/src/main/jniLibs/armeabi-v7a" />
+             
+        <!-- <lib-file src="src/android/libs/PaxNeptuneLiteApi_V2.01.00_20171025.jar" target-dir="libs" />      -->
+        <lib-file src="src/android/libs/nimbus-jose-jwt-8.9.jar" target-dir="libs" />
+        <lib-file src="src/android/libs/java-json.jar" target-dir="libs" />
+        <lib-file src="src/android/libs/GLPage_V1.03.00_20181030.jar" target-dir="libs" />
+        <lib-file src="src/android/libs/json-smart-2.3.jar" target-dir="libs" />
+        <lib-file src="src/android/libs/AMap_Location_V4.2.0_20180809.jar" target-dir="libs" />
+        <lib-file src="src/android/libs/commujar-1.0.1.jar" target-dir="libs" />
+        <lib-file src="src/android/InterApp_IMS_PAX_v10.0.8-20240730.aar" />
+
+        <!-- Gradle configuration -->
+        <framework src="src/android/opensdk.gradle" custom="true" type="gradleReference"/>
+        <framework src="com.android.support:support-v4:23.1.1"/>
+        <framework src="com.android.support:appcompat-v7:22.1.0"/>
+        <framework src="com.android.support:design:23.1.0"/>
+        <framework src="com.whatspos.sdk:paxstore-3rd-app-android-sdk:9.7.1"/>
+
+        <!-- Preferences -->
+        <preference name="ANDROID_SUPPORT_V4_VERSION" default="27.+" />
+    </platform>
+</plugin>

@@ -13,34 +13,51 @@
 
 #define BLE_DEVICE_NAME        "NWARE01"
 
-// Max RS485 frame buffered before BLE send.
-// Each byte becomes "XX " (3 chars): 64 bytes -> 192 chars, within MTU 512.
 #define RS485_BUF_SIZE         64
 #define HEX_BUF_SIZE           (RS485_BUF_SIZE * 3 + 1)
-
-// Minimum non-zero bytes required to treat a frame as valid.
-// Filters out idle-bus noise (all 0x00) and single-byte glitches.
 #define MIN_VALID_BYTES        2
+
+// USB CDC baud (Pi bridge writes at this baud)
+#define USB_BAUD               115200
 
 // =====================================================
 
 BLECharacteristic *txCharacteristic;
-
 volatile int connectedCount = 0;
-
-// =====================================================
-
-// RS485 UART
-// RX = GPIO26
-// TX = GPIO27
-// =====================================================
 
 HardwareSerial rs485(2);
 
-// Drain and discard everything in the RS485 RX FIFO.
 static void flushRS485()
 {
     while (rs485.available()) rs485.read();
+}
+
+// Emit raw ASCII already-formatted string as BLE notify.
+// The Pi bridge sends lines like "RX 01 42 01 30 7F 0D\n" — pass through as-is
+// so the phone gets a human-readable line without hex-of-hex re-encoding.
+static void bleNotifyRaw(const uint8_t *buf, int len)
+{
+    if (len <= 0 || connectedCount <= 0) return;
+    txCharacteristic->setValue((uint8_t *)buf, len);
+    txCharacteristic->notify();
+    delay(20);
+}
+
+// Hex-encode raw byte buffer and BLE notify (used for RS-485 tap traffic).
+static void bleNotifyHex(const uint8_t *raw, int n)
+{
+    if (n <= 0 || connectedCount <= 0) return;
+    static char hexBuf[HEX_BUF_SIZE];
+    int pos = 0;
+    for (int i = 0; i < n; i++) {
+        hexBuf[pos++] = "0123456789abcdef"[raw[i] >> 4];
+        hexBuf[pos++] = "0123456789abcdef"[raw[i] & 0x0F];
+        hexBuf[pos++] = ' ';
+    }
+    hexBuf[pos] = '\0';
+    txCharacteristic->setValue((uint8_t *)hexBuf, pos);
+    txCharacteristic->notify();
+    delay(20);
 }
 
 // =====================================================
@@ -54,10 +71,8 @@ class MyServerCallbacks : public BLEServerCallbacks
         connectedCount++;
         Serial.print("BLE Connected: ");
         Serial.println(connectedCount);
-        // No delay() here -- runs inside the BLE stack task.
         BLEDevice::startAdvertising();
     }
-
     void onDisconnect(BLEServer* pServer)
     {
         if (connectedCount > 0) connectedCount--;
@@ -68,7 +83,7 @@ class MyServerCallbacks : public BLEServerCallbacks
 };
 
 // =====================================================
-// RX CALLBACK  (BLE -> RS485)
+// RX CALLBACK (BLE -> RS485)
 // =====================================================
 
 class RXCallbacks : public BLECharacteristicCallbacks
@@ -76,19 +91,10 @@ class RXCallbacks : public BLECharacteristicCallbacks
     void onWrite(BLECharacteristic *pCharacteristic)
     {
         String value = pCharacteristic->getValue();
-
-        if (value.length() > 0)
-        {
-            Serial.print("BLE RX: ");
-
-            for (int i = 0; i < (int)value.length(); i++)
-            {
-                uint8_t c = (uint8_t)value[i];
-                Serial.write(c);
-                rs485.write(c);
+        if (value.length() > 0) {
+            for (int i = 0; i < (int)value.length(); i++) {
+                rs485.write((uint8_t)value[i]);
             }
-
-            Serial.println();
         }
     }
 };
@@ -97,17 +103,14 @@ class RXCallbacks : public BLECharacteristicCallbacks
 
 void setup()
 {
-    Serial.begin(115200);
-
+    Serial.begin(USB_BAUD);
     rs485.begin(9600, SERIAL_8N1, 26, 27);
-
-    // Discard any noise that accumulated during UART startup.
     delay(50);
     flushRS485();
 
     Serial.println();
     Serial.println("====================================");
-    Serial.println(" ESP32 BLE RS485 HEX ");
+    Serial.println(" ESP32 BLE RS485 HEX  v2 (USB+UART) ");
     Serial.println("====================================");
 
     BLEDevice::init(BLE_DEVICE_NAME);
@@ -118,18 +121,14 @@ void setup()
 
     BLEService *pService = pServer->createService(SERVICE_UUID);
 
-    // TX characteristic (RS485 -> BLE notify)
     txCharacteristic = pService->createCharacteristic(
         CHARACTERISTIC_UUID_TX,
-        BLECharacteristic::PROPERTY_NOTIFY
-    );
+        BLECharacteristic::PROPERTY_NOTIFY);
     txCharacteristic->addDescriptor(new BLE2902());
 
-    // RX characteristic (BLE -> RS485 write)
     BLECharacteristic *rxCharacteristic = pService->createCharacteristic(
         CHARACTERISTIC_UUID_RX,
-        BLECharacteristic::PROPERTY_WRITE
-    );
+        BLECharacteristic::PROPERTY_WRITE);
     rxCharacteristic->setCallbacks(new RXCallbacks());
 
     pService->start();
@@ -149,71 +148,45 @@ void setup()
 
 void loop()
 {
+    // ---------- Path 1: RS-485 (GPIO26/27) tap -> BLE hex ----------
+    // Same behaviour as v1; live sites (Vikhroli / KMP) don't change.
     static uint8_t rawBuf[RS485_BUF_SIZE];
-    static char    hexBuf[HEX_BUF_SIZE];
-    int            byteCount = 0;
+    int byteCount = 0;
 
-    // Collect a full RS485 frame: read until bus quiet for 5 ms.
-    if (rs485.available())
-    {
+    if (rs485.available()) {
         unsigned long lastByte = millis();
-
-        while (byteCount < RS485_BUF_SIZE)
-        {
-            if (rs485.available())
-            {
+        while (byteCount < RS485_BUF_SIZE) {
+            if (rs485.available()) {
                 rawBuf[byteCount++] = rs485.read();
                 lastByte = millis();
-            }
-            else if (millis() - lastByte >= 5)
-            {
-                // Bus idle for 5 ms -- end of frame.
-                break;
-            }
+            } else if (millis() - lastByte >= 5) break;
         }
     }
-
-    // Validate frame: count non-zero bytes.
     int nonZero = 0;
-    for (int i = 0; i < byteCount; i++)
-    {
-        if (rawBuf[i] != 0x00) nonZero++;
-    }
+    for (int i = 0; i < byteCount; i++) if (rawBuf[i] != 0x00) nonZero++;
+    if (byteCount > 0 && nonZero < MIN_VALID_BYTES) { flushRS485(); byteCount = 0; }
+    if (byteCount > 0) bleNotifyHex(rawBuf, byteCount);
 
-    if (byteCount > 0 && nonZero < MIN_VALID_BYTES)
-    {
-        // Idle-bus noise or glitch -- flush FIFO so CPU isn't spun reading zeros.
-        flushRS485();
-        byteCount = 0;
-    }
+    // ---------- Path 2: USB CDC (from Pi) -> BLE pass-through ----------
+    // Pi bridge writes ready-to-display ASCII lines terminated by '\n'.
+    // We collect one line and notify as-is so the phone terminal shows
+    // exactly what the bridge sent (no hex-of-hex re-encoding).
+    static uint8_t usbLine[192];
+    static int     usbLen = 0;
 
-    // Build hex string and forward to BLE.
-    if (byteCount > 0)
-    {
-        int pos = 0;
-
-        for (int i = 0; i < byteCount; i++)
-        {
-            uint8_t b = rawBuf[i];
-
-            hexBuf[pos++] = "0123456789abcdef"[b >> 4];
-            hexBuf[pos++] = "0123456789abcdef"[b & 0x0F];
-            hexBuf[pos++] = ' ';
-
-            Serial.print(hexBuf[pos - 3]);
-            Serial.print(hexBuf[pos - 2]);
-            Serial.print(' ');
+    while (Serial.available()) {
+        uint8_t b = (uint8_t)Serial.read();
+        if (b == '\r') continue;
+        if (b == '\n' || usbLen >= (int)sizeof(usbLine) - 1) {
+            if (usbLen > 0) {
+                usbLine[usbLen] = '\0';
+                bleNotifyRaw(usbLine, usbLen);
+                usbLen = 0;
+            }
+            if (b != '\n') { usbLine[usbLen++] = b; }
+            continue;
         }
-
-        hexBuf[pos] = '\0';
-        Serial.println();
-
-        if (connectedCount > 0)
-        {
-            txCharacteristic->setValue((uint8_t*)hexBuf, pos);
-            txCharacteristic->notify();
-            delay(20);
-        }
+        usbLine[usbLen++] = b;
     }
 
     delay(5);
